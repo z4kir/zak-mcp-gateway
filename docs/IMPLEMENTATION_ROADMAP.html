@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ZAK MCP Gateway - Implementation Roadmap</title>
+  <style>
+    @page { size: A4; margin: 15mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #1e293b;
+      background: #ffffff;
+      line-height: 1.5;
+      font-size: 10pt;
+      margin: 0;
+      padding: 0;
+    }
+    .header {
+      border-bottom: 2px solid #0284c7;
+      padding-bottom: 12px;
+      margin-bottom: 20px;
+    }
+    h1 {
+      font-size: 20pt;
+      margin: 0 0 6px 0;
+      color: #0f172a;
+    }
+    .subtitle {
+      color: #64748b;
+      font-size: 11pt;
+      margin: 0;
+    }
+    h2 {
+      font-size: 13pt;
+      color: #0369a1;
+      margin: 18px 0 8px 0;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 4px;
+    }
+    h3 {
+      font-size: 11pt;
+      color: #0f172a;
+      margin: 12px 0 4px 0;
+    }
+    p, ul { margin: 6px 0; }
+    ul { padding-left: 20px; }
+    li { margin-bottom: 4px; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      font-size: 8.5pt;
+      font-weight: 600;
+      border-radius: 4px;
+      background: #e0f2fe;
+      color: #0369a1;
+      margin-right: 6px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 12px 0;
+    }
+    .card {
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 10px 14px;
+      background: #f8fafc;
+    }
+    .card.danger {
+      border-color: #fca5a5;
+      background: #fff1f2;
+    }
+    .card.success {
+      border-color: #86efac;
+      background: #f0fdf4;
+    }
+    .card-title {
+      font-weight: 700;
+      font-size: 10pt;
+      margin-bottom: 6px;
+    }
+    .danger .card-title { color: #b91c1c; }
+    .success .card-title { color: #15803d; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: 9.5pt;
+    }
+    th, td {
+      border: 1px solid #cbd5e1;
+      padding: 6px 10px;
+      text-align: left;
+    }
+    th {
+      background: #f1f5f9;
+      font-weight: 600;
+      color: #334155;
+    }
+    .phase-box {
+      border-left: 4px solid #0284c7;
+      padding: 8px 12px;
+      background: #f8fafc;
+      margin: 10px 0;
+      border-radius: 0 4px 4px 0;
+    }
+    .page-break { page-break-before: always; }
+    .footer {
+      margin-top: 24px;
+      border-top: 1px solid #e2e8f0;
+      padding-top: 8px;
+      font-size: 8.5pt;
+      color: #94a3b8;
+      display: flex;
+      justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>ZAK MCP Gateway: Implementation Roadmap</h1>
+    <p class="subtitle">System Architecture, Execution Lifecycle & Phase-Wise Implementation Plan</p>
+  </div>
+
+  <h2>1. Executive Overview</h2>
+  <p>The <strong>ZAK MCP Gateway (TO-MCP)</strong> is a transparent middleware proxy positioned between AI agents (Cursor, Claude Desktop, LangChain) and downstream Model Context Protocol servers. It resolves the two critical protocol flaws: <strong>Schema Inflation</strong> and <strong>Payload Flooding</strong>.</p>
+
+  <div class="grid">
+    <div class="card danger">
+      <div class="card-title">❌ Standard MCP (Without Gateway)</div>
+      <ul>
+        <li><strong>Fixed cold-start:</strong> ~28,500 tokens of unminified Draft-07 JSON schemas.</li>
+        <li><strong>Unused tools:</strong> 91% of loaded tools are never called during a session.</li>
+        <li><strong>Payload flood:</strong> 15KB–60KB raw REST API payloads injected into memory.</li>
+      </ul>
+    </div>
+    <div class="card success">
+      <div class="card-title">✅ ZAK MCP Gateway (Optimized)</div>
+      <ul>
+        <li><strong>Fixed cold-start:</strong> ~320 tokens (exposes only 2 universal meta-tools).</li>
+        <li><strong>On-demand discovery:</strong> Compact TypeScript signatures loaded JIT.</li>
+        <li><strong>Egress projection:</strong> JSONPath masks strip nulls and unwanted fields.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>2. Three-Step Execution Lifecycle</h2>
+  <div class="phase-box">
+    <strong>Step 1: Just-In-Time Discovery (mcp_search_tools)</strong><br/>
+    Agent sends a query (e.g. <code>"create issue"</code>). MiniSearch BM25 engine retrieves matching tools in &lt;1ms and returns compact TypeScript signatures (~36 tokens vs ~192 tokens JSON schema).
+  </div>
+  <div class="phase-box">
+    <strong>Step 2: Execution Dispatch & Decision Gate (mcp_call_tool)</strong><br/>
+    Gateway evaluates Tier-1 SHA-256 exact hit cache. If idempotent query is cached, returns result instantly (0 tokens, 0 latency). Otherwise, dispatches call to child MCP process.
+  </div>
+  <div class="phase-box">
+    <strong>Step 3: Egress Distillation & Projection (project_fields)</strong><br/>
+    Gateway applies JSONPath field whitelisting, removes recursive null/empty structures, and transforms JSON arrays into compact TSV tables before returning to the model.
+  </div>
+
+  <div class="page-break"></div>
+
+  <h2>3. Phase-by-Phase Implementation Roadmap</h2>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 15%;">Phase</th>
+        <th style="width: 25%;">Component</th>
+        <th style="width: 40%;">Key Implementation Tasks</th>
+        <th style="width: 20%;">Token / Latency Goal</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Phase 1</strong></td>
+        <td>Core Stdio Proxy & JIT Discovery (MVP)</td>
+        <td>
+          • Connect downstream stdio processes (<code>client-pool.ts</code>)<br/>
+          • MiniSearch BM25 lexical index (<code>search-index.ts</code>)<br/>
+          • Expose <code>mcp_search_tools</code> & <code>mcp_call_tool</code>
+        </td>
+        <td><span class="badge">-99% Startup</span><br/>320 token fixed root</td>
+      </tr>
+      <tr>
+        <td><strong>Phase 2</strong></td>
+        <td>Schema Transpiler</td>
+        <td>
+          • JSON Schema ➔ Compact TypeScript compiler (<code>ts-transpiler.ts</code>)<br/>
+          • Handle primitives, enums, optional fields, union types<br/>
+          • Token usage counter & benchmarking harness
+        </td>
+        <td><span class="badge">-81% Schema</span><br/>36 tokens per signature</td>
+      </tr>
+      <tr>
+        <td><strong>Phase 3</strong></td>
+        <td>Egress Distiller & Decision Gate</td>
+        <td>
+          • JSONPath <code>project_fields</code> filter (<code>projection-filter.ts</code>)<br/>
+          • Recursive null/empty pruner (<code>null-pruner.ts</code>)<br/>
+          • Tier-1 SHA-256 exact match cache (<code>sha-cache.ts</code>)<br/>
+          • Idempotency safety evaluator (<code>idempotency.ts</code>)
+        </td>
+        <td><span class="badge">-94% Payload</span><br/>0 tokens on cache hits</td>
+      </tr>
+      <tr>
+        <td><strong>Phase 4</strong></td>
+        <td>Host Integration & Code Sandbox</td>
+        <td>
+          • Register in Claude Desktop and Cursor configs<br/>
+          • Multi-turn SWE-bench / developer benchmark evaluation<br/>
+          • Phase 2 roadmap: Ephemeral QuickJS/V8 sandbox (Code Mode)
+        </td>
+        <td><span class="badge">E2E Verification</span><br/>Production ready</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>4. Benchmark Performance Target</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Metric</th>
+        <th>Standard MCP</th>
+        <th>ZAK Gateway</th>
+        <th>Net Advantage</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Startup Context Footprint</td>
+        <td>38,450 tokens</td>
+        <td>320 tokens</td>
+        <td><strong>-99.1% overhead</strong></td>
+      </tr>
+      <tr>
+        <td>Average Response Size</td>
+        <td>14,200 tokens</td>
+        <td>840 tokens</td>
+        <td><strong>-94.0% payload</strong></td>
+      </tr>
+      <tr>
+        <td>Total 15-Turn Trajectory</td>
+        <td>576,750 tokens</td>
+        <td>18,420 tokens</td>
+        <td><strong>-96.8% total volume</strong></td>
+      </tr>
+      <tr>
+        <td>Time-to-First-Token (TTFT)</td>
+        <td>3,840 ms</td>
+        <td>410 ms</td>
+        <td><strong>9.3x faster</strong></td>
+      </tr>
+      <tr>
+        <td>Estimated Cost (Sonnet 3.5)</td>
+        <td>$2.88</td>
+        <td>$0.09</td>
+        <td><strong>32x cost reduction</strong></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <span>ZAK MCP Gateway Architecture Specification</span>
+    <span>Reference: RFC-2026-TO • Confidential & Open Architecture</span>
+  </div>
+
+</body>
+</html>
