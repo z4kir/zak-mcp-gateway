@@ -1,0 +1,38 @@
+{
+  "$schema": "./schema.json",
+  "gateway": {
+    "name": "zak-mcp-gateway",
+    "version": "0.1.0",
+    "port": 3800,
+    "logLevel": "info",
+    "cache": {
+      "enabled": true,
+      "exactMatchTtlSeconds": 300,
+      "maxEntries": 1000
+    },
+    "discovery": {
+      "maxSearchResults": 5,
+      "minScore": 0.2
+    }
+  },
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "your-token-here"
+      },
+      "pinned": false
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:\\Users\\skzak\\zak-mcp-gateway"],
+      "pinned": true
+    },
+    "postgres": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/mydb"],
+      "pinned": false
+    }
+  }
+}
