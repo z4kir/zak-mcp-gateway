@@ -15,7 +15,7 @@ type Mode = "gateway" | "direct";
 const GATEWAY_ROOT = process.env.GATEWAY_ROOT ?? path.resolve(process.cwd(), "..");
 const GATEWAY_CLI = path.join(GATEWAY_ROOT, "dist", "cli.js");
 const GATEWAY_CONFIG = process.env.GATEWAY_CONFIG ?? path.join(GATEWAY_ROOT, "config", "servers.json");
-const MODEL = process.env.GEMINI_MODEL ?? "gemini-3.8-flash";
+const DEFAULT_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.8-flash";
 const MAX_MODEL_CALLS = 12;
 
 interface McpConnection {
@@ -70,6 +70,7 @@ export async function POST(req: Request) {
     const sessionId: string = body.sessionId ?? "default";
     const preload: boolean = body.preload !== false;
     const apiKey: string | undefined = body.apiKey || process.env.GEMINI_API_KEY;
+    const model: string = typeof body.model === "string" && body.model ? body.model : DEFAULT_MODEL;
 
     if (!apiKey) {
       return NextResponse.json({ error: "Missing Gemini API key (enter it in the sidebar or set GEMINI_API_KEY)" }, { status: 400 });
@@ -77,7 +78,7 @@ export async function POST(req: Request) {
     if (!message) return NextResponse.json({ error: "Empty message" }, { status: 400 });
 
     const conn = await getConnection(mode);
-    const chatKey = `${sessionId}:${mode}`;
+    const chatKey = `${sessionId}:${mode}:${model}`;
     let chat = chats.get(chatKey);
     let preloaded: string | undefined;
 
@@ -95,7 +96,7 @@ export async function POST(req: Request) {
       }
       const ai = new GoogleGenAI({ apiKey });
       chat = ai.chats.create({
-        model: MODEL,
+        model,
         config: {
           systemInstruction: systemInstruction || undefined,
           tools: [
@@ -122,7 +123,7 @@ export async function POST(req: Request) {
       usage.outputTokens += (u?.candidatesTokenCount ?? 0) + (u?.thoughtsTokenCount ?? 0);
     };
 
-    let response = await chat.sendMessage({ message });
+    let response = await sendWithRetry(chat, { message });
     record(response);
 
     let calls: FunctionCall[] = response.functionCalls ?? [];
@@ -146,14 +147,14 @@ export async function POST(req: Request) {
           }
         })
       );
-      response = await chat.sendMessage({ message: parts });
+      response = await sendWithRetry(chat, { message: parts });
       record(response);
       calls = response.functionCalls ?? [];
     }
 
     return NextResponse.json({
       mode,
-      model: MODEL,
+      model,
       text: response.text ?? "(no text response)",
       usage,
       toolCalls,
@@ -162,6 +163,42 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     console.error("Agent API Error:", error);
-    return NextResponse.json({ error: (error as Error).message }, { status: 500 });
+    return NextResponse.json({ error: friendlyError(error) }, { status: 500 });
   }
+}
+
+/**
+ * Gemini sometimes answers 503 "high demand" or 500 for a few seconds. Retry those with
+ * backoff; never retry 429 quota errors (they last hours).
+ */
+async function sendWithRetry(chat: Chat, params: Parameters<Chat["sendMessage"]>[0]) {
+  const delays = [2000, 5000, 10000];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await chat.sendMessage(params);
+    } catch (err) {
+      const msg = (err as Error)?.message ?? "";
+      const transient = /"code":\s*(500|503)|UNAVAILABLE|INTERNAL|high demand|overloaded/i.test(msg);
+      if (!transient || attempt >= delays.length) throw err;
+      console.warn(`[agent-ui] Gemini busy (attempt ${attempt + 1}), retrying in ${delays[attempt] / 1000}s`);
+      await new Promise(r => setTimeout(r, delays[attempt]));
+    }
+  }
+}
+
+/** Turn Gemini's raw JSON errors (quota, bad model) into one readable line. */
+function friendlyError(error: unknown): string {
+  const raw = (error as Error)?.message ?? String(error);
+  if (/RESOURCE_EXHAUSTED|"code":\s*429|quota/i.test(raw)) {
+    const limit = raw.match(/quotaValue"?:\s*"?(\d+)/)?.[1];
+    const model = raw.match(/"model":\s*"([^"]+)"/)?.[1];
+    const retry = raw.match(/retry in ((?:\d+h)?(?:\d+m)?\d+)(?:\.\d+)?s/i)?.[1];
+    return `Gemini free-tier quota used up${model ? ` for ${model}` : ""}${limit ? ` (${limit} requests/day)` : ""}.` +
+      `${retry ? ` Resets in ${retry}s.` : ""} Pick another model in the sidebar: each model has its own free quota.`;
+  }
+  if (/"code":\s*(500|503)|UNAVAILABLE|high demand/i.test(raw)) {
+    return "Gemini is overloaded right now (503, retried 3 times). Wait a minute and resend, or pick another model in the sidebar.";
+  }
+  if (/"code":\s*404|not found/i.test(raw)) return `Model not available for this key: ${raw.slice(0, 200)}`;
+  return raw.length > 400 ? `${raw.slice(0, 400)}…` : raw;
 }

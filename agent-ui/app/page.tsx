@@ -35,6 +35,9 @@ export default function AgentPage() {
   const [message, setMessage] = useState("");
   const [runMode, setRunMode] = useState<Mode | "compare">("compare");
   const [preload, setPreload] = useState(true);
+  const [model, setModel] = useState("");
+  const [models, setModels] = useState<{ id: string; label: string }[]>([]);
+  const [modelsNote, setModelsNote] = useState("");
   const [sessionId, setSessionId] = useState(newSession);
   const [chatLog, setChatLog] = useState<LogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -44,7 +47,7 @@ export default function AgentPage() {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text, apiKey, mode, sessionId, preload })
+      body: JSON.stringify({ message: text, apiKey, mode, sessionId, preload, model })
     });
     const data = await res.json();
     if (data.error) return { mode, text: "", usage: emptyUsage(), toolCalls: [], toolDefinitions: { count: 0, chars: 0 }, preloaded: [], error: data.error };
@@ -83,6 +86,26 @@ export default function AgentPage() {
     }
   };
 
+  const loadModels = async () => {
+    setModelsNote("Loading...");
+    try {
+      const res = await fetch("/api/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey })
+      });
+      const data = await res.json();
+      if (data.error) {
+        setModelsNote(data.error);
+        return;
+      }
+      setModels(data.models);
+      setModelsNote(`${data.models.length} models. Each has its own free daily quota.`);
+    } catch (err) {
+      setModelsNote((err as Error).message);
+    }
+  };
+
   const reset = () => {
     setSessionId(newSession());
     setChatLog([]);
@@ -113,6 +136,26 @@ export default function AgentPage() {
         </div>
 
         <div>
+          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Model</label>
+          <div className="flex gap-1">
+            <select
+              className="flex-1 min-w-0 px-2 py-2 border border-slate-300 rounded text-sm bg-white"
+              value={model}
+              onChange={e => setModel(e.target.value)}
+            >
+              <option value="">Server default (GEMINI_MODEL or gemini-3.8-flash)</option>
+              {models.map(m => (
+                <option key={m.id} value={m.id}>{m.id}</option>
+              ))}
+            </select>
+            <button onClick={loadModels} className="px-2 py-2 border border-slate-300 rounded text-sm text-slate-600">
+              Load
+            </button>
+          </div>
+          {modelsNote && <p className="text-xs text-slate-500 mt-1">{modelsNote}</p>}
+        </div>
+
+        <div>
           <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Run against</label>
           <div className="flex gap-1">
             {(["compare", "gateway", "direct"] as const).map(m => (
@@ -129,6 +172,7 @@ export default function AgentPage() {
             <input type="checkbox" checked={preload} onChange={e => setPreload(e.target.checked)} />
             Preload likely tools (gateway)
           </label>
+          {runMode === "compare" && <p className="text-xs text-slate-400 mt-1">A/B runs every question twice (uses about twice the quota).</p>}
         </div>
 
         <div className="space-y-2">
