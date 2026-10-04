@@ -37,10 +37,8 @@ coverage/
 agent-ui/test-sdk.ts
 tests/_*.mjs
 
-# Editors (shared VS Code launch/tasks configs are kept)
-.vscode/*
-!.vscode/launch.json
-!.vscode/tasks.json
+# Editors
+.vscode/
 .idea/
 *.swp
 
