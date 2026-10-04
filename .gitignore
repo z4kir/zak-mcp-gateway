@@ -1,7 +1,50 @@
+# Dependencies
 node_modules/
+.pnp
+.pnp.*
+
+# Build output
 dist/
-*.log
+*.tsbuildinfo
+*.tgz
+
+# Next.js (agent-ui also has its own .gitignore)
+agent-ui/.next/
+agent-ui/out/
+agent-ui/next-env.d.ts
+
+# Local config & secrets (commit config/servers.example.json instead)
+config/servers.json
 .env
-.env.local
+.env.*
+*.pem
+
+# Gateway runtime data (stats log, benchmark output)
+.zak-gateway/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Test / coverage output
+coverage/
+.nyc_output/
+
+# Scratch experiments
+agent-ui/test-sdk.ts
+tests/_*.mjs
+
+# Editors (shared VS Code launch/tasks configs are kept)
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+.idea/
+*.swp
+
+# OS
 .DS_Store
 Thumbs.db
+desktop.ini

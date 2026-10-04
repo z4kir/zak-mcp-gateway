@@ -1,56 +1,43 @@
+type PathTree = Map<string, PathTree>;
+
 /**
  * Egress Projection Filter:
- * Extracts only requested fields from large JSON payloads.
- * Supports dot-notation paths (e.g. "status.name", "assignee.displayName").
+ * Keeps only the requested field paths. Dot paths walk through arrays automatically, so
+ * on a list of commits ["sha", "commit.message"] keeps exactly those two fields per commit,
+ * and on {total_count, items: [...]} the path "items.title" keeps each item's title.
  */
 export class ProjectionFilter {
   public static project(data: unknown, fields?: string[]): unknown {
     if (!fields || fields.length === 0 || !data || typeof data !== "object") {
       return data;
     }
-
-    if (Array.isArray(data)) {
-      return data.map(item => this.project(item, fields));
-    }
-
-    const projected: Record<string, unknown> = {};
-    const obj = data as Record<string, unknown>;
-
-    for (const field of fields) {
-      if (field.includes(".")) {
-        const parts = field.split(".");
-        let current: unknown = obj;
-        let valid = true;
-
-        for (const part of parts) {
-          if (current && typeof current === "object" && part in (current as Record<string, unknown>)) {
-            current = (current as Record<string, unknown>)[part];
-          } else {
-            valid = false;
-            break;
-          }
-        }
-
-        if (valid) {
-          this.setNested(projected, parts, current);
-        }
-      } else if (field in obj) {
-        projected[field] = obj[field];
-      }
-    }
-
-    return projected;
+    return this.projectTree(data, this.buildTree(fields));
   }
 
-  private static setNested(target: Record<string, unknown>, path: string[], value: unknown): void {
-    let curr = target;
-    for (let i = 0; i < path.length - 1; i++) {
-      const seg = path[i];
-      if (!curr[seg] || typeof curr[seg] !== "object") {
-        curr[seg] = {};
+  private static buildTree(fields: string[]): PathTree {
+    const root: PathTree = new Map();
+    for (const field of fields) {
+      let node = root;
+      for (const part of field.split(".").filter(Boolean)) {
+        if (!node.has(part)) node.set(part, new Map());
+        node = node.get(part)!;
       }
-      curr = curr[seg] as Record<string, unknown>;
     }
-    curr[path[path.length - 1]] = value;
+    return root;
+  }
+
+  private static projectTree(value: unknown, tree: PathTree): unknown {
+    if (tree.size === 0) return value; // leaf: keep the whole value
+    if (Array.isArray(value)) return value.map(item => this.projectTree(item, tree));
+    if (!value || typeof value !== "object") return undefined;
+
+    const obj = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [key, subtree] of tree) {
+      if (!(key in obj)) continue;
+      const projected = this.projectTree(obj[key], subtree);
+      if (projected !== undefined) out[key] = projected;
+    }
+    return out;
   }
 }

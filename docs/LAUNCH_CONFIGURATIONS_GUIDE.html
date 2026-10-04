@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ZAK MCP Gateway - VS Code Launch & Debugging Guide</title>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --primary-light: #eff6ff;
+      --accent: #8b5cf6;
+      --text: #1e293b;
+      --text-muted: #64748b;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --border: #e2e8f0;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --code-bg: #0f172a;
+      --code-text: #e2e8f0;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      line-height: 1.6;
+      color: var(--text);
+      background-color: var(--bg);
+      padding: 30px;
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    header {
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      color: white;
+      padding: 32px;
+      border-radius: 12px;
+      margin-bottom: 24px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+
+    h1 {
+      font-size: 26pt;
+      font-weight: 700;
+      margin-bottom: 8px;
+      letter-spacing: -0.02em;
+    }
+
+    .subtitle {
+      font-size: 13pt;
+      color: #94a3b8;
+      margin-bottom: 18px;
+    }
+
+    .badge-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 8.5pt;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .badge-primary { background: #3b82f6; color: white; }
+    .badge-accent { background: #8b5cf6; color: white; }
+    .badge-success { background: #10b981; color: white; }
+    .badge-warning { background: #f59e0b; color: white; }
+    .badge-neutral { background: #475569; color: #f1f5f9; }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 22px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+    }
+
+    h2 {
+      font-size: 16pt;
+      font-weight: 600;
+      color: #0f172a;
+      margin-bottom: 14px;
+      padding-bottom: 6px;
+      border-bottom: 2px solid #e2e8f0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    h3 {
+      font-size: 12pt;
+      font-weight: 600;
+      color: #1e293b;
+      margin-top: 14px;
+      margin-bottom: 8px;
+    }
+
+    p {
+      margin-bottom: 10px;
+      color: #334155;
+      font-size: 10pt;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0;
+      font-size: 9.5pt;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      background-color: #f1f5f9;
+      color: #475569;
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 8pt;
+      letter-spacing: 0.04em;
+    }
+
+    tr:hover td {
+      background-color: #f8fafc;
+    }
+
+    pre, code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    code {
+      background-color: #f1f5f9;
+      color: #0f172a;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 9pt;
+    }
+
+    pre {
+      background-color: var(--code-bg);
+      color: var(--code-text);
+      padding: 14px;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 8.5pt;
+      line-height: 1.45;
+      margin: 10px 0;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .config-card {
+      background: #fafafa;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+
+    .config-title {
+      font-weight: 600;
+      font-size: 10.5pt;
+      color: #0f172a;
+      margin-bottom: 4px;
+    }
+
+    .config-desc {
+      font-size: 8.5pt;
+      color: #64748b;
+      margin-bottom: 8px;
+    }
+
+    .diagram {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 12px 0;
+      display: flex;
+      justify-content: center;
+    }
+
+    @media print {
+      body {
+        margin: 0;
+        padding: 15mm;
+        font-size: 10pt;
+        color: #111;
+        background: white;
+      }
+      .page-break {
+        page-break-before: always;
+      }
+      @page {
+        size: A4;
+        margin: 15mm;
+      }
+      header {
+        box-shadow: none;
+        border: 1px solid #ccc;
+      }
+      .card {
+        box-shadow: none;
+        border: 1px solid #ddd;
+        break-inside: avoid;
+      }
+      pre {
+        background: #111827 !important;
+        color: #f9fafb !important;
+        white-space: pre-wrap;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>VS Code Launch Configurations</h1>
+    <div class="subtitle">Complete Debugging & Runtime Profiles for All Servers in ZAK MCP Gateway</div>
+    <div class="badge-group">
+      <span class="badge badge-primary">VS Code 0.2.0</span>
+      <span class="badge badge-accent">10 Launch Profiles</span>
+      <span class="badge badge-success">2 Compound Stacks</span>
+      <span class="badge badge-warning">Node.js + TSX</span>
+      <span class="badge badge-neutral">Windows & Cross-Platform</span>
+    </div>
+  </header>
+
+  <div class="card">
+    <h2>1. Overview of All Configured Servers</h2>
+    <p>Every server component within the <code>zak-mcp-gateway</code> repository is configured in <code>.vscode/launch.json</code> and supported by automated build tasks in <code>.vscode/tasks.json</code>:</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th>Configuration Name</th>
+          <th>Target / Command</th>
+          <th>Port / Transport</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Gateway</strong></td>
+          <td><code>Gateway Server (Dev - tsx)</code></td>
+          <td><code>src/cli.ts</code> via <code>--import tsx</code></td>
+          <td>Stdio (MCP Proxy)</td>
+        </tr>
+        <tr>
+          <td><strong>Gateway</strong></td>
+          <td><code>Gateway Server (Built - dist/cli.js)</code></td>
+          <td><code>dist/cli.js</code> (Pre-builds <code>tsc</code>)</td>
+          <td>Stdio (MCP Proxy)</td>
+        </tr>
+        <tr>
+          <td><strong>Gateway</strong></td>
+          <td><code>Gateway Server (Dev - Example Config)</code></td>
+          <td><code>src/cli.ts</code> with <code>servers.example.json</code></td>
+          <td>Stdio (MCP Proxy)</td>
+        </tr>
+        <tr>
+          <td><strong>Agent UI</strong></td>
+          <td><code>Agent UI Server (Next.js Dev)</code></td>
+          <td><code>agent-ui/</code> via Next.js Dev</td>
+          <td>HTTP <code>:3000</code></td>
+        </tr>
+        <tr>
+          <td><strong>Agent UI</strong></td>
+          <td><code>Agent UI Server (Next.js Start - Production)</code></td>
+          <td><code>agent-ui/</code> via Next.js Production</td>
+          <td>HTTP <code>:3000</code></td>
+        </tr>
+        <tr>
+          <td><strong>Mock Server</strong></td>
+          <td><code>Mock MCP Server (Stdio Test)</code></td>
+          <td><code>tests/mock-server.mjs</code></td>
+          <td>Stdio (MCP Server)</td>
+        </tr>
+        <tr>
+          <td><strong>Downstream</strong></td>
+          <td><code>Downstream: Filesystem (MCP Server)</code></td>
+          <td><code>npx @modelcontextprotocol/server-filesystem</code></td>
+          <td>Stdio</td>
+        </tr>
+        <tr>
+          <td><strong>Downstream</strong></td>
+          <td><code>Downstream: GitHub (MCP Server)</code></td>
+          <td><code>npx @modelcontextprotocol/server-github</code></td>
+          <td>Stdio</td>
+        </tr>
+        <tr>
+          <td><strong>Downstream</strong></td>
+          <td><code>Downstream: Postgres (MCP Server)</code></td>
+          <td><code>npx @modelcontextprotocol/server-postgres</code></td>
+          <td>Stdio</td>
+        </tr>
+        <tr>
+          <td><strong>Downstream</strong></td>
+          <td><code>Downstream: Slack (MCP Server)</code></td>
+          <td><code>npx @modelcontextprotocol/server-slack</code></td>
+          <td>Stdio</td>
+        </tr>
+        <tr>
+          <td><strong>Full Stack</strong></td>
+          <td><code>Full Stack: Gateway (Dev) + Agent UI</code></td>
+          <td>Gateway (Dev) + Next.js UI Dev (Simultaneous)</td>
+          <td>Stdio + HTTP :3000</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>2. Architecture & Runtime Topology</h2>
+    <div class="diagram">
+      <svg width="760" height="200" viewBox="0 0 760 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- Agent UI Box -->
+        <rect x="20" y="55" width="160" height="90" rx="8" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+        <text x="100" y="90" font-family="sans-serif" font-size="13" font-weight="bold" fill="#1D4ED8" text-anchor="middle">Agent UI Server</text>
+        <text x="100" y="110" font-family="sans-serif" font-size="10" fill="#64748B" text-anchor="middle">Next.js 16 (Port 3000)</text>
+        <text x="100" y="125" font-family="sans-serif" font-size="9" fill="#3B82F6" text-anchor="middle">Gemini Flash + UI Chat</text>
+
+        <!-- Arrow UI -> Gateway -->
+        <path d="M180 100 H260" stroke="#3B82F6" stroke-width="2" marker-end="url(#arrow)"/>
+        <text x="220" y="90" font-family="sans-serif" font-size="9" fill="#64748B" text-anchor="middle">Stdio Client</text>
+
+        <!-- Gateway Box -->
+        <rect x="260" y="30" width="220" height="140" rx="8" fill="#F5F3FF" stroke="#8B5CF6" stroke-width="2"/>
+        <text x="370" y="60" font-family="sans-serif" font-size="13" font-weight="bold" fill="#6D28D9" text-anchor="middle">ZAK MCP Gateway</text>
+        <text x="370" y="80" font-family="sans-serif" font-size="10" fill="#64748B" text-anchor="middle">Universal TO-MCP Proxy</text>
+        <rect x="275" y="95" width="190" height="22" rx="4" fill="#DDD6FE"/>
+        <text x="370" y="110" font-family="sans-serif" font-size="9" font-weight="bold" fill="#5B21B6" text-anchor="middle">2-Meta Tools (Search / Call)</text>
+        <text x="370" y="135" font-family="sans-serif" font-size="9" fill="#4B5563" text-anchor="middle">BM25 Discovery + SHA-256 Cache</text>
+        <text x="370" y="152" font-family="sans-serif" font-size="9" fill="#4B5563" text-anchor="middle">Egress Distiller &amp; Projection</text>
+
+        <!-- Arrows to Downstream -->
+        <path d="M480 75 H540" stroke="#8B5CF6" stroke-width="1.5"/>
+        <path d="M480 100 H540" stroke="#8B5CF6" stroke-width="1.5"/>
+        <path d="M480 125 H540" stroke="#8B5CF6" stroke-width="1.5"/>
+
+        <!-- Downstream MCP Servers -->
+        <rect x="540" y="20" width="190" height="35" rx="6" fill="#F0FDF4" stroke="#10B981" stroke-width="1.5"/>
+        <text x="635" y="42" font-family="sans-serif" font-size="10" font-weight="bold" fill="#047857" text-anchor="middle">Filesystem MCP Server</text>
+
+        <rect x="540" y="65" width="190" height="35" rx="6" fill="#F0FDF4" stroke="#10B981" stroke-width="1.5"/>
+        <text x="635" y="87" font-family="sans-serif" font-size="10" font-weight="bold" fill="#047857" text-anchor="middle">GitHub MCP Server</text>
+
+        <rect x="540" y="110" width="190" height="35" rx="6" fill="#F0FDF4" stroke="#10B981" stroke-width="1.5"/>
+        <text x="635" y="132" font-family="sans-serif" font-size="10" font-weight="bold" fill="#047857" text-anchor="middle">Postgres / Slack / Mock MCP</text>
+      </svg>
+    </div>
+  </div>
+
+  <div class="page-break"></div>
+
+  <div class="card">
+    <h2>3. Detailed Configuration Details</h2>
+
+    <div class="grid-2">
+      <div class="config-card">
+        <div class="config-title">🚀 Gateway Server (Dev - tsx)</div>
+        <div class="config-desc">Runs directly from TypeScript sources without waiting for build steps. Ideal for active development of gateway dispatcher, discovery, or cache engines.</div>
+        <pre><code>"name": "Gateway Server (Dev - tsx)",
+"type": "node",
+"request": "launch",
+"runtimeArgs": ["--import", "tsx"],
+"program": "${workspaceFolder}/src/cli.ts",
+"args": ["--config", "${workspaceFolder}/config/servers.json"]</code></pre>
+      </div>
+
+      <div class="config-card">
+        <div class="config-title">📦 Gateway Server (Built - dist/cli.js)</div>
+        <div class="config-desc">Executes the compiled JavaScript bundle. Triggers <code>Build Gateway (tsc)</code> pre-launch task automatically to ensure source maps match compiled code.</div>
+        <pre><code>"name": "Gateway Server (Built - dist/cli.js)",
+"type": "node",
+"request": "launch",
+"program": "${workspaceFolder}/dist/cli.js",
+"preLaunchTask": "Build Gateway (tsc)",
+"sourceMaps": true</code></pre>
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-top: 14px;">
+      <div class="config-card">
+        <div class="config-title">🌐 Agent UI Server (Next.js Dev)</div>
+        <div class="config-desc">Starts the web UI frontend and Gemini MCP bridge at <code>http://localhost:3000</code>. Supports breakpoints in API routes (<code>/api/chat</code>).</div>
+        <pre><code>"name": "Agent UI Server (Next.js Dev)",
+"type": "node",
+"request": "launch",
+"cwd": "${workspaceFolder}/agent-ui",
+"runtimeExecutable": "node",
+"runtimeArgs": ["./node_modules/next/dist/bin/next", "dev"]</code></pre>
+      </div>
+
+      <div class="config-card">
+        <div class="config-title">🧪 Mock MCP Server (Stdio Test)</div>
+        <div class="config-desc">Runs the lightweight mock server providing <code>mock_read_db</code> and <code>mock_write_db</code> without requiring external credentials.</div>
+        <pre><code>"name": "Mock MCP Server (Stdio Test)",
+"type": "node",
+"request": "launch",
+"program": "${workspaceFolder}/tests/mock-server.mjs"</code></pre>
+      </div>
+    </div>
+
+    <h3 style="margin-top: 20px;">Downstream MCP Servers</h3>
+    <p>Individual launch profiles exist for each downstream server declared in <code>config/servers.json</code>. They include Windows platform overrides for <code>npx.cmd</code> to ensure smooth execution on Windows:</p>
+    <ul>
+      <li><code>Downstream: Filesystem (MCP Server)</code>: Mounts the current repository folder.</li>
+      <li><code>Downstream: GitHub (MCP Server)</code>: Uses <code>${env:GITHUB_PERSONAL_ACCESS_TOKEN}</code>.</li>
+      <li><code>Downstream: Postgres (MCP Server)</code>: Connects to local PostgreSQL instance.</li>
+      <li><code>Downstream: Slack (MCP Server)</code>: Uses <code>${env:SLACK_BOT_TOKEN}</code>.</li>
+    </ul>
+
+    <h3 style="margin-top: 16px;">Compound Launch Configurations</h3>
+    <p>Use the <strong>"Full Stack: Gateway (Dev) + Agent UI"</strong> compound launch configuration to start both the backend MCP gateway and the frontend Next.js chat agent simultaneously with a single click (F5).</p>
+  </div>
+
+  <div class="card">
+    <h2>4. Quick Start: Debugging in VS Code</h2>
+    <ol style="padding-left: 20px; font-size: 9.5pt; color: #334155; line-height: 1.8;">
+      <li>Open the <strong>Run &amp; Debug</strong> view in VS Code (<code>Ctrl + Shift + D</code>).</li>
+      <li>From the top dropdown, select <strong>"Full Stack: Gateway (Dev) + Agent UI"</strong> or any individual server.</li>
+      <li>Press <strong>F5</strong> to begin debugging with active breakpoints.</li>
+      <li>Inspect logs in the integrated terminal or output console.</li>
+    </ol>
+  </div>
+
+</body>
+</html>

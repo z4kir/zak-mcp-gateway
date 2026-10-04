@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ZAK MCP Gateway: How It Works</title>
+<style>
+  :root {
+    --ink: #1b1f24; --ink-2: #4a5360; --ink-3: #7a838f; --line: #dfe3e8; --bg-soft: #f6f7f9;
+    --teal: #0f8a7e; --teal-soft: #e3f4f1; --purple: #6b4bc4; --purple-soft: #efeafb;
+    --amber-soft: #fff6e0; --amber: #9a6a00;
+    --s1: #2a78d6; --s2: #eb6834;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", Inter, Roboto, system-ui, sans-serif; color: var(--ink); margin: 0; padding: 28px 36px; font-size: 10.5pt; line-height: 1.5; background: #fff; }
+  h1 { font-size: 24pt; margin: 0 0 4px; letter-spacing: -0.3px; }
+  h2 { font-size: 14.5pt; margin: 26px 0 8px; padding-bottom: 4px; border-bottom: 2px solid var(--line); }
+  h3 { font-size: 11pt; margin: 14px 0 6px; }
+  p { margin: 6px 0; }
+  .sub { color: var(--ink-2); font-size: 11.5pt; margin-bottom: 14px; }
+  .muted { color: var(--ink-3); font-size: 9pt; }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 14px 0; }
+  .tile { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .tile .num { font-size: 20pt; font-weight: 700; line-height: 1.1; }
+  .tile .lbl { color: var(--ink-2); font-size: 9pt; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin: 10px 0; background: var(--bg-soft); }
+  .analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); border-radius: 0 8px 8px 0; padding: 10px 14px; margin: 10px 0; }
+  .analogy b { color: var(--amber); }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 9.5pt; }
+  th, td { border-bottom: 1px solid var(--line); padding: 5px 7px; text-align: left; vertical-align: top; }
+  th { background: var(--bg-soft); font-weight: 600; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .chip { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 8.5pt; font-weight: 600; }
+  .chip.before { background: var(--teal-soft); color: var(--teal); }
+  .chip.after { background: var(--purple-soft); color: var(--purple); }
+  .chip.around { background: #eef1f4; color: var(--ink-2); }
+  .chip.done { background: #e4f4e4; color: #1d6b1d; }
+  .chip.part { background: var(--amber-soft); color: var(--amber); }
+  .chip.no { background: #f6e6e6; color: #9b2c2c; }
+  code { font-family: Consolas, "Cascadia Code", monospace; font-size: 9pt; background: #eef1f4; padding: 0 4px; border-radius: 3px; }
+  pre { font-family: Consolas, monospace; font-size: 7.6pt; overflow-x: auto; background: #1e2329; color: #e6e9ee; padding: 10px 12px; border-radius: 6px; white-space: pre; margin: 6px 0; }
+  .flow { display: flex; flex-direction: column; gap: 0; margin: 8px 0; }
+  .step { display: grid; grid-template-columns: 34px 1fr 150px; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .step .no { width: 28px; height: 28px; border-radius: 50%; background: var(--ink); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; }
+  .step .cost { text-align: right; font-size: 9pt; color: var(--ink-2); }
+  .step.before { border-left: 5px solid var(--teal); }
+  .step.after { border-left: 5px solid var(--purple); }
+  .arrow { text-align: center; color: var(--ink-3); line-height: 1; font-size: 13pt; margin: 1px 0; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .legend { display: flex; gap: 16px; font-size: 9pt; color: var(--ink-2); margin: 4px 0 6px; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 5px; }
+  svg text { font-family: "Segoe UI", Inter, Roboto, system-ui, sans-serif; }
+  .page-break { page-break-before: always; break-before: page; }
+  @page { size: A4; margin: 14mm; }
+  @media print {
+    body { padding: 0; font-size: 10pt; }
+    .card, .tile, .step, table, svg, .analogy { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<h1>ZAK MCP Gateway</h1>
+<div class="sub">How it works, in plain words: every technique, a picture of it, an everyday comparison, and the measured results.</div>
+
+<div class="tiles">
+  <div class="tile"><div class="num">88%</div><div class="lbl">fewer tokens for tool definitions on every model request (GitHub, 26 tools)</div></div>
+  <div class="tile"><div class="num">95%</div><div class="lbl">fewer tokens in tool results across 7 real GitHub calls</div></div>
+  <div class="tile"><div class="num">93%</div><div class="lbl">fewer input tokens over a whole 7-step agent task</div></div>
+  <div class="tile"><div class="num">94%</div><div class="lbl">still saved when the model uses prompt caching (cost-weighted)</div></div>
+</div>
+<p class="muted">Measured on 4 Oct 2026 with the real GitHub MCP server against the public repo modelcontextprotocol/servers, counted with the o200k tokenizer. Details and limits are in section 5.</p>
+
+<h2>1. The problem in one minute</h2>
+<p>An AI agent uses tools (GitHub, files, databases) through <b>MCP</b>. The model is billed per <b>token</b>, which is roughly a short piece of a word. MCP wastes tokens in two places:</p>
+<div class="two">
+  <div class="card"><b>Before the call: the manuals.</b> Every tool's full JSON description is sent with <i>every</i> request, even if the agent uses only one or two tools. GitHub alone is 3,600 tokens; GitHub plus the filesystem server is about 7,500.</div>
+  <div class="card"><b>After the call: the results.</b> Asking for 10 commits returns about 18,000 tokens of JSON: avatars, API links, IDs, pretty-printing. The agent needed about 800 tokens of it, and the rest stays in the conversation for every later turn.</div>
+</div>
+<div class="analogy"><b>Analogy:</b> You ask a hotel front desk for "a taxi". Before you can speak, they hand you the manual for every service in the hotel. When the taxi arrives, they also give you the driver's full employment file. The gateway is a good concierge: a one-page directory, a short answer, and the file stays in the back office if you ever need it.</div>
+
+<h2>2. The big picture</h2>
+<p>The gateway is one MCP server that the agent connects to. Behind it sit all your real MCP servers. Teal techniques (and the teal request arrows) shrink what goes <b>into</b> the model before a call; purple techniques shrink what comes <b>back</b> after it.</p>
+
+<svg viewBox="0 0 700 330" width="100%" role="img" aria-label="Architecture: agent, gateway with before and after lanes, MCP servers">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#4a5360"/></marker>
+  </defs>
+  <!-- agent -->
+  <rect x="8" y="118" width="112" height="92" rx="10" fill="#1b1f24"/>
+  <text x="64" y="156" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">AI agent</text>
+  <text x="64" y="176" fill="#c9ced6" font-size="10" text-anchor="middle">Claude, Cursor,</text>
+  <text x="64" y="190" fill="#c9ced6" font-size="10" text-anchor="middle">Gemini app</text>
+  <!-- gateway -->
+  <rect x="150" y="10" width="400" height="310" rx="12" fill="#fff" stroke="#1b1f24" stroke-width="1.5"/>
+  <text x="350" y="32" font-size="13" font-weight="700" text-anchor="middle">ZAK MCP Gateway</text>
+  <text x="350" y="47" font-size="9.5" fill="#7a838f" text-anchor="middle">sees: 3 meta-tools + a one-line tool index (~440 tokens)</text>
+  <!-- before lane -->
+  <rect x="165" y="58" width="370" height="108" rx="8" fill="#e3f4f1"/>
+  <text x="177" y="76" font-size="10.5" font-weight="700" fill="#0f8a7e">BEFORE THE CALL</text>
+  <g font-size="9.5" fill="#1b1f24">
+    <rect x="177" y="86" width="110" height="30" rx="6" fill="#fff" stroke="#0f8a7e"/><text x="232" y="105" text-anchor="middle">Tool index</text>
+    <rect x="295" y="86" width="110" height="30" rx="6" fill="#fff" stroke="#0f8a7e"/><text x="350" y="105" text-anchor="middle">Tool search</text>
+    <rect x="413" y="86" width="110" height="30" rx="6" fill="#fff" stroke="#0f8a7e"/><text x="468" y="105" text-anchor="middle">Short signatures</text>
+    <rect x="177" y="124" width="110" height="30" rx="6" fill="#fff" stroke="#0f8a7e"/><text x="232" y="143" text-anchor="middle">Name + arg repair</text>
+    <rect x="295" y="124" width="110" height="30" rx="6" fill="#fff" stroke="#0f8a7e"/><text x="350" y="143" text-anchor="middle">Safety policy</text>
+    <rect x="413" y="124" width="110" height="30" rx="6" fill="#fff" stroke="#0f8a7e"/><text x="468" y="143" text-anchor="middle">Exact cache</text>
+  </g>
+  <!-- after lane -->
+  <rect x="165" y="176" width="370" height="108" rx="8" fill="#efeafb"/>
+  <text x="177" y="194" font-size="10.5" font-weight="700" fill="#6b4bc4">AFTER THE CALL</text>
+  <g font-size="9.5" fill="#1b1f24">
+    <rect x="177" y="204" width="110" height="30" rx="6" fill="#fff" stroke="#6b4bc4"/><text x="232" y="223" text-anchor="middle">Field projection</text>
+    <rect x="295" y="204" width="110" height="30" rx="6" fill="#fff" stroke="#6b4bc4"/><text x="350" y="223" text-anchor="middle">Noise + null removal</text>
+    <rect x="413" y="204" width="110" height="30" rx="6" fill="#fff" stroke="#6b4bc4"/><text x="468" y="223" text-anchor="middle">Tables (TSV)</text>
+    <rect x="177" y="242" width="110" height="30" rx="6" fill="#fff" stroke="#6b4bc4"/><text x="232" y="261" text-anchor="middle">Smart clipping</text>
+    <rect x="295" y="242" width="110" height="30" rx="6" fill="#fff" stroke="#6b4bc4"/><text x="350" y="261" text-anchor="middle">Handles + preview</text>
+    <rect x="413" y="242" width="110" height="30" rx="6" fill="#fff" stroke="#6b4bc4"/><text x="468" y="261" text-anchor="middle">Injection warning</text>
+  </g>
+  <rect x="165" y="291" width="370" height="22" rx="6" fill="#eef1f4"/>
+  <text x="350" y="306" font-size="9.5" text-anchor="middle" fill="#4a5360">Around everything: savings log, token budget, code mode, A/B baseline mode</text>
+  <!-- servers -->
+  <g font-size="10.5" font-weight="600" text-anchor="middle">
+    <rect x="590" y="40" width="102" height="44" rx="8" fill="#f6f7f9" stroke="#7a838f"/><text x="641" y="67">GitHub</text>
+    <rect x="590" y="102" width="102" height="44" rx="8" fill="#f6f7f9" stroke="#7a838f"/><text x="641" y="129">Filesystem</text>
+    <rect x="590" y="164" width="102" height="44" rx="8" fill="#f6f7f9" stroke="#7a838f"/><text x="641" y="191">Database</text>
+    <rect x="590" y="226" width="102" height="44" rx="8" fill="#f6f7f9" stroke="#7a838f"/><text x="641" y="253">Any MCP server</text>
+  </g>
+  <text x="641" y="292" font-size="9" fill="#7a838f" text-anchor="middle">stdio or HTTP</text>
+  <!-- arrows -->
+  <path d="M120,145 L162,112" stroke="#0f8a7e" stroke-width="1.8" fill="none" marker-end="url(#ah)"/>
+  <path d="M162,228 L122,186" stroke="#6b4bc4" stroke-width="1.8" fill="none" marker-end="url(#ah)"/>
+  <path d="M570,62 L570,248" stroke="#7a838f" stroke-width="1.5"/>
+  <g stroke="#7a838f" stroke-width="1.5"><path d="M570,62 L588,62"/><path d="M570,124 L588,124"/><path d="M570,186 L588,186"/><path d="M570,248 L588,248"/></g>
+  <path d="M537,110 L568,110" stroke="#0f8a7e" stroke-width="1.8" fill="none" marker-end="url(#ah)"/>
+  <path d="M570,230 L540,230" stroke="#6b4bc4" stroke-width="1.8" fill="none" marker-end="url(#ah)"/>
+</svg>
+
+<h2>3. One request, step by step</h2>
+<p>Real example from the benchmark: <i>"show the last 10 commits of modelcontextprotocol/servers"</i>.</p>
+<div class="flow">
+  <div class="step before"><div class="no">1</div><div><b>Agent reads the tool index</b> that came with the session: <code>github: list_commits, list_issues, ...</code>. It already knows <code>list_commits</code> exists.</div><div class="cost">in every request: ~440 tokens instead of 3,600</div></div>
+  <div class="arrow">↓</div>
+  <div class="step before"><div class="no">2</div><div><b>Agent searches</b> <code>mcp_search_tools("list recent commits")</code> and gets one short line:<br><code>github__list_commits({ owner: string, repo: string, sha?: string, page?: number, perPage?: number })</code></div><div class="cost">55 tokens (optional step)</div></div>
+  <div class="arrow">↓</div>
+  <div class="step before"><div class="no">3</div><div><b>Agent calls</b> <code>mcp_call_tool</code>. The gateway fixes small mistakes (<code>per_page</code> → <code>perPage</code>, <code>github::x</code> → <code>github__x</code>), checks the safety rules, and looks in the cache.</div><div class="cost">0 extra round trips</div></div>
+  <div class="arrow">↓</div>
+  <div class="step after"><div class="no">4</div><div><b>GitHub answers</b> with pretty-printed JSON for 10 commits: authors, avatars, 20 API links each, signatures, parents.</div><div class="cost">18,337 tokens raw</div></div>
+  <div class="arrow">↓</div>
+  <div class="step after"><div class="no">5</div><div><b>The gateway distills it:</b> keeps the configured fields, drops link noise and empty values, turns the list into a table, and stores the full original as handle <code>r1</code>.</div><div class="cost">876 tokens to the model</div></div>
+  <div class="arrow">↓</div>
+  <div class="step after"><div class="no">6</div><div><b>Only if needed:</b> <code>mcp_get_result({handle:"r1", grep:"fix", fields:["sha"]})</code> pulls exactly the extra rows or fields, or <code>raw:true</code> returns the untouched original. Nothing is lost.</div><div class="cost">pay only for what you read</div></div>
+</div>
+
+<p>What the model actually receives in step 5 (columns shortened here for print):</p>
+<pre>sha       commit.message                                commit.author.name  commit.author.date    html_url
+5abed86…  Merge pull request #4939 from …policy-to-main  Cliff Hall          2026-10-04T04:01:54Z  https://github.com/…
+a207787…  chore: sync the bug report form with v2/main…  cliffhall           …                     https://github.com/…
+… 8 more rows
+[r1: default fields, noise keys removed; full data via mcp_get_result]</pre>
+
+<h2>4. Every technique, with an everyday comparison</h2>
+<table>
+  <tr><th style="width:17%">Technique</th><th style="width:9%">Where</th><th style="width:38%">What it does (simply)</th><th>Real-world analogy</th></tr>
+  <tr><td><b>Meta-tools</b></td><td><span class="chip before">before</span></td><td>The agent sees 3 tools (search, call, get_result) instead of every server's tools.</td><td>One concierge desk instead of 40 service counters.</td></tr>
+  <tr><td><b>Tool index</b></td><td><span class="chip before">before</span></td><td>One line per server listing tool names, sent as server instructions. The model knows what exists without the manuals, and often skips the search.</td><td>The building directory in the lobby.</td></tr>
+  <tr><td><b>Tool search (BM25)</b></td><td><span class="chip before">before</span></td><td>Finds the right tool from plain words, with synonyms like "PR" → pull request and "ticket" → issue. Right tool in the top 3 for 32 of 32 test queries.</td><td>Asking a librarian instead of reading every catalog card.</td></tr>
+  <tr><td><b>Short signatures</b></td><td><span class="chip before">before</span></td><td>A long JSON schema becomes one TypeScript-style line. Parameter hints and limits are kept. Schemas too complex to shorten safely keep the full (minified) version.</td><td>A recipe card instead of the cookbook chapter.</td></tr>
+  <tr><td><b>Name + argument repair</b></td><td><span class="chip before">before</span></td><td>Accepts <code>github::x</code> or <code>x</code>; renames <code>per_page</code> → <code>perPage</code>; turns <code>"5"</code> into 5; on a real mistake it returns the signature, so the next try is right.</td><td>A postal clerk who fixes a misspelled street instead of returning the letter.</td></tr>
+  <tr><td><b>Exact cache</b></td><td><span class="chip before">before</span></td><td>The same read with the same arguments within 5 minutes is answered from memory. Never used for writes, and any write clears that server's cache.</td><td>A cafe that remembers your usual order, and forgets it when the menu changes.</td></tr>
+  <tr><td><b>Safety policy</b></td><td><span class="chip before">before</span></td><td>Read-only mode, per-server read-only, allow and deny lists, and writes need <code>confirm: true</code> after the user agrees. Tools are classed read or write from MCP annotations, then verbs; unknown counts as write.</td><td>A bank teller who asks for your signature before a withdrawal.</td></tr>
+  <tr><td><b>Field projection</b></td><td><span class="chip after">after</span></td><td>Keeps only the fields asked for (<code>project_fields</code>), or per-tool defaults from the config. Works through lists: <code>commit.author.name</code> on every commit.</td><td>A highlighter on a long report.</td></tr>
+  <tr><td><b>Noise + null removal</b></td><td><span class="chip after">after</span></td><td>Drops API link fields (<code>*_url</code>), internal IDs, and empty or null values.</td><td>Throwing away junk mail before handing over the post.</td></tr>
+  <tr><td><b>Tables (TSV)</b></td><td><span class="chip after">after</span></td><td>A list of records is sent as a table, so key names appear once, not on every row. Used only when it is smaller.</td><td>A spreadsheet instead of one letter per customer.</td></tr>
+  <tr><td><b>Smart clipping</b></td><td><span class="chip after">after</span></td><td>Only when a result is too big: long text in lists is cut short; a single document keeps as much as fits.</td><td>Reading the first chapters, with a bookmark for the rest.</td></tr>
+  <tr><td><b>Handles + preview</b></td><td><span class="chip after">after</span></td><td>A big result stays in the gateway. The model gets the first rows plus a handle like <code>r3</code>, then pages, greps, or picks fields.</td><td>A coat-check ticket: your coat is safe; collect it only if you need it.</td></tr>
+  <tr><td><b>Injection warning</b></td><td><span class="chip after">after</span></td><td>Results containing text like "ignore previous instructions" are flagged as untrusted data.</td><td>An "unverified sender" stamp on a note from a stranger.</td></tr>
+  <tr><td><b>Savings log + report</b></td><td><span class="chip around">around</span></td><td>Every call is logged (raw vs sent tokens) to a JSONL file; <code>npm run report</code> recomputes totals. Live view: resource <code>zak://stats</code>.</td><td>An electricity meter: you see what you saved.</td></tr>
+  <tr><td><b>Token budget</b></td><td><span class="chip around">around</span></td><td>Optional session limit: at 80% results get half the room; at 100% the gateway asks the model to wrap up.</td><td>A prepaid phone plan that warns you before it runs out.</td></tr>
+  <tr><td><b>Code mode</b> (opt-in)</td><td><span class="chip around">around</span></td><td>The model writes a short script that calls several read tools inside the gateway; only the final answer returns. Not a security sandbox, so it is off by default.</td><td>Sending a runner to visit five shops and bring back one receipt.</td></tr>
+  <tr><td><b>Tool preload</b> (agent UI)</td><td><span class="chip around">around</span></td><td>The first user message is searched up front and the best 3 signatures go into the system prompt, saving one model round trip.</td><td>A waiter who brings water before you ask.</td></tr>
+  <tr><td><b>Passthrough baseline</b></td><td><span class="chip around">around</span></td><td><code>--passthrough</code> runs the same servers as plain MCP, for honest before/after tests on the same scale.</td><td>Weighing yourself before and after on the same scale.</td></tr>
+</table>
+
+<div class="analogy"><b>Why fewer round trips matter:</b> each time the model calls a tool, the <i>whole</i> conversation is sent again. A 18,000-token result read once is paid for on every later turn. Keeping it out of the conversation saves it many times over. That is why the agent-loop saving (93%) is larger than any single step suggests.</div>
+
+<h2 class="page-break">5. Measured results (live GitHub MCP)</h2>
+<p>Same downstream server, same calls, two modes: <b>Direct MCP</b> (<code>--passthrough</code>) and <b>Gateway</b>. Command: <code>npm run bench:github</code>.</p>
+
+<div class="legend"><span><i style="background:var(--s1)"></i>Direct MCP</span><span><i style="background:var(--s2)"></i>Gateway</span><span class="muted">each panel uses its own scale</span></div>
+<svg viewBox="0 0 700 250" width="100%" role="img" aria-label="Direct MCP versus Gateway tokens in four panels">
+  <g font-size="10.5" fill="#1b1f24">
+    <!-- panel 1 -->
+    <text x="0" y="16" font-weight="700">Tool definitions per request</text>
+    <rect x="0" y="24" width="300" height="16" rx="4" fill="#2a78d6"/><text x="306" y="36" fill="#4a5360">3,600</text>
+    <rect x="0" y="42" width="36.6" height="16" rx="4" fill="#eb6834"/><text x="42" y="54" fill="#4a5360">439 (−88%)</text>
+    <!-- panel 2 -->
+    <text x="360" y="16" font-weight="700">7 tool results (+ search for gateway)</text>
+    <rect x="360" y="24" width="300" height="16" rx="4" fill="#2a78d6"/>
+    <text x="364" y="36" fill="#fff" font-weight="600">157,173</text>
+    <rect x="360" y="42" width="14.2" height="16" rx="4" fill="#eb6834"/><text x="380" y="54" fill="#4a5360">7,452 (−95%)</text>
+    <!-- panel 3 -->
+    <text x="0" y="136" font-weight="700">Whole 7-step agent task: input tokens</text>
+    <rect x="0" y="144" width="300" height="16" rx="4" fill="#2a78d6"/><text x="4" y="156" fill="#fff" font-weight="600">805,337 · 8 model calls</text>
+    <rect x="0" y="162" width="20.5" height="16" rx="4" fill="#eb6834"/><text x="26" y="174" fill="#4a5360">55,130 · 13 model calls (−93%)</text>
+    <!-- panel 4 -->
+    <text x="360" y="136" font-weight="700">Same task with prompt caching (cost-weighted)</text>
+    <rect x="360" y="144" width="300" height="16" rx="4" fill="#2a78d6"/><text x="364" y="156" fill="#fff" font-weight="600">265,745</text>
+    <rect x="360" y="162" width="17.1" height="16" rx="4" fill="#eb6834"/><text x="383" y="174" fill="#4a5360">15,140 (−94%)</text>
+  </g>
+  <text x="0" y="214" font-size="9" fill="#7a838f">Agent task model: every request re-sends tool definitions plus all earlier results; the gateway adds one search request per new tool.</text>
+  <text x="0" y="228" font-size="9" fill="#7a838f">Caching model: previously sent prefix billed at 10%, new tokens at 125% (Anthropic-style cache write/read prices).</text>
+</svg>
+
+<table>
+  <tr><th>Call</th><th class="n">Direct MCP</th><th class="n">Gateway</th><th class="n">Search used</th><th>What the gateway did</th></tr>
+  <tr><td>list_commits (10)</td><td class="n">18,337</td><td class="n">876</td><td class="n">55</td><td>default fields → table</td></tr>
+  <tr><td>list_commits (30), agent asked for sha + message</td><td class="n">61,589</td><td class="n">1,280</td><td class="n">0</td><td>projection → table</td></tr>
+  <tr><td>list_issues (20 open)</td><td class="n">32,013</td><td class="n">890</td><td class="n">267</td><td>default fields → table</td></tr>
+  <tr><td>list_pull_requests (10 closed)</td><td class="n">20,929</td><td class="n">827</td><td class="n">229</td><td>default fields → table</td></tr>
+  <tr><td>search_repositories (10)</td><td class="n">3,470</td><td class="n">485</td><td class="n">257</td><td>wrapper → meta line + table</td></tr>
+  <tr><td>get_file_contents (README, 8.7 KB)</td><td class="n">2,498</td><td class="n">1,212</td><td class="n">198</td><td>kept most of the text, handle for the rest</td></tr>
+  <tr><td>list_commits again (same args)</td><td class="n">18,337</td><td class="n">876</td><td class="n">0</td><td>served from cache (no GitHub call)</td></tr>
+  <tr><th>Total</th><th class="n">157,173</th><th class="n">6,446</th><th class="n">1,006</th><th></th></tr>
+</table>
+<p>With GitHub and the filesystem server together (40 tools), tool definitions drop from about 7,500 to about 560 tokens per request (gateway's own estimate, <code>npm run test:github</code>).</p>
+
+<h3>Read these numbers honestly</h3>
+<ul>
+  <li><b>Small setups can cost more.</b> With 5 small tools the gateway's ~410 definition tokens exceed the ~280 of direct MCP. The gateway pays off with many tools or big results.</li>
+  <li><b>Extra round trips.</b> Searching adds model requests (13 vs 8 here). They are cheap because the context is small, but they add latency. The tool index and tool preload let the model skip most searches.</li>
+  <li><b>Tokenizer.</b> Counts use the o200k tokenizer as a stand-in; Claude and Gemini count a little differently, but ratios hold. The LLM-in-the-loop check (real Gemini usage numbers, both modes) is in <code>agent-ui</code> and needs your Gemini API key.</li>
+  <li><b>Search accuracy</b> (32/32 in the top 3) was measured on a query set used while tuning synonyms, so treat it as a regression check, not independent proof.</li>
+  <li><b>Task success</b> is not measured by token counts. Default projections hide fields; the handle keeps them reachable, but the agent must ask.</li>
+</ul>
+
+<h2>6. Bugs found and fixed in this upgrade</h2>
+<table>
+  <tr><th style="width:30%">Problem</th><th>Effect</th><th>Fix</th></tr>
+  <tr><td>Cache key used <code>JSON.stringify(obj, keysArray)</code></td><td>Every call hashed to the same key, so one cached result could be returned for a different tool</td><td>Stable, sorted serialization of tool + args; regression test</td></tr>
+  <tr><td><code>isIdempotent = readOnly || false</code></td><td>Caching silently off for almost every server; name check never ran</td><td>Read/write classifier: MCP annotations, then verbs, unknown = write</td></tr>
+  <tr><td>Results wrapped in <code>JSON.stringify(result, null, 2)</code></td><td>Double-encoded JSON (<code>\"</code> everywhere) plus indentation, bigger than the raw result</td><td>Return the distilled content directly</td></tr>
+  <tr><td><code>"&lt;YOUR_GITHUB_TOKEN&gt;"</code> placeholder in config</td><td>Overrode the real environment token → GitHub 401</td><td>Placeholders ignored, <code>${VAR}</code> secrets, warning for hard-coded tokens</td></tr>
+  <tr><td>Tests and live script used <code>github::</code>; code used <code>github__</code></td><td>"Tool not found"</td><td>One separator (<code>__</code>, valid for every LLM) plus tolerant name lookup</td></tr>
+  <tr><td>Live test sent <code>per_page</code>, the tool wants <code>perPage</code></td><td>Silently ignored: 30 commits instead of 3</td><td>Argument repair renames near-miss names and reports it</td></tr>
+  <tr><td>Projection through arrays</td><td><code>commit.message</code> on a list returned nothing</td><td>Path-tree projection that walks lists</td></tr>
+  <tr><td>Agent UI "tokens saved" = <code>35000 + 0.1 × input</code></td><td>Made-up number</td><td>Real A/B: same prompt through gateway and passthrough, Gemini's own usage numbers</td></tr>
+  <tr><td>Agent UI counted only the last model call; handled one function call per turn; sent raw <code>$schema</code> to Gemini <code>parameters</code></td><td>Undercounted tokens; dropped parallel calls; schema errors</td><td>Sum all calls; answer all calls; use <code>parametersJsonSchema</code></td></tr>
+  <tr><td>Unused config: <code>cache.enabled</code>, <code>maxEntries</code>, <code>minScore</code>; unused TSV converter</td><td>Settings did nothing</td><td>All wired in (LRU cache, relative score floor, TSV renderer)</td></tr>
+</table>
+
+<h2>7. Plan coverage (Architecture &amp; Build Plan)</h2>
+<table>
+  <tr><th style="width:18%">Phase</th><th style="width:12%">Status</th><th>Notes</th></tr>
+  <tr><td>1. Core gateway</td><td><span class="chip done">done</span></td><td>Config, parallel downstream connections (stdio and HTTP), catalog, search, signatures, 3 meta-tools. Client sees ~440 tokens with GitHub (target ≈ 400).</td></tr>
+  <tr><td>2. Result handling</td><td><span class="chip done">done</span></td><td>Token estimate, null removal, TSV, handles with paging/grep/fields/raw, projection. A 61k-token result returns 1.3k.</td></tr>
+  <tr><td>3. Stats</td><td><span class="chip done">done</span></td><td>JSONL log (not SQLite: simpler, no dependency, recomputable), CLI report, session budget, <code>zak://stats</code>.</td></tr>
+  <tr><td>4. Safety</td><td><span class="chip done">done</span></td><td>Read-only, confirm writes, allow/deny, injection warning, secrets from env.</td></tr>
+  <tr><td>5. Benchmark</td><td><span class="chip part">partial</span></td><td>Live GitHub A/B done. Still open: 10–20 tasks over 3+ servers with a real model and success rates (the agent UI A/B mode is ready for it).</td></tr>
+  <tr><td>6. Advanced</td><td><span class="chip part">partial</span></td><td>Done: exact cache, code mode (opt-in), tool preload, configured default fields. Not done: cheap-model router (belongs in the host app, not the gateway) and learned field pruning.</td></tr>
+</table>
+<p class="muted">Tests use Node's built-in test runner instead of vitest, so no new dependency was added. The only new package is <code>js-tiktoken</code>, as a dev dependency for the benchmark.</p>
+
+<h2>8. Try it yourself</h2>
+<pre>npm install &amp;&amp; npm test            # 27 tests: unit + full MCP round trip with a mock server
+npm run test:github                  # live: CLI over stdio → GitHub MCP (no token needed for public repos)
+npm run bench:github                 # live A/B token benchmark (writes .zak-gateway/benchmark-github.json)
+npm run report                       # savings from the log
+cd agent-ui &amp;&amp; npm run dev            # Gemini agent, "Both (A/B)" mode, real usage numbers</pre>
+
+</body>
+</html>

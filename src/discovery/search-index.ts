@@ -10,10 +10,54 @@ interface IndexedToolDocument {
   parameters: string;
 }
 
+/** Everyday words -> the vocabulary MCP tool names actually use. */
+const SYNONYMS: Record<string, string[]> = {
+  pr: ["pull", "request"],
+  prs: ["pull", "request"],
+  mr: ["pull", "request"],
+  repo: ["repository"],
+  repos: ["repository"],
+  ticket: ["issue"],
+  tickets: ["issue"],
+  bug: ["issue"],
+  bugs: ["issue"],
+  commits: ["commit"],
+  history: ["commits", "list"],
+  log: ["commits"],
+  folder: ["directory"],
+  dir: ["directory"],
+  ls: ["list", "directory"],
+  cat: ["read", "file"],
+  open: ["create", "read", "get"],
+  file: ["file", "contents"],
+  show: ["get", "list"],
+  fetch: ["get"],
+  make: ["create"],
+  new: ["create"],
+  add: ["create", "add"],
+  edit: ["update", "edit"],
+  change: ["update", "edit"],
+  modify: ["update", "edit"],
+  delete: ["delete", "remove"],
+  remove: ["delete", "remove"],
+  find: ["search"],
+  lookup: ["search", "get"],
+  sql: ["query"],
+  db: ["query", "database"],
+  table: ["query"],
+  review: ["review", "reviews"],
+  diff: ["files", "diff"],
+  changes: ["files", "diff"],
+  comment: ["comment", "comments"],
+  merge: ["merge"],
+  user: ["users"],
+  people: ["users"]
+};
+
 /**
  * JIT Tool Discovery Engine:
- * Indexes all tools across downstream MCP servers and provides sub-millisecond
- * search retrieval so the LLM prompt only receives relevant tools.
+ * BM25 (MiniSearch) over tool names, descriptions and parameter names, with fuzzy + prefix
+ * matching and a small synonym map. Returns compact signatures for the best matches only.
  */
 export class ToolDiscoveryEngine {
   private miniSearch: MiniSearch<IndexedToolDocument>;
@@ -22,57 +66,68 @@ export class ToolDiscoveryEngine {
   constructor() {
     this.miniSearch = new MiniSearch<IndexedToolDocument>({
       fields: ["name", "description", "serverId", "parameters"],
-      storeFields: ["id", "serverId", "name"],
+      storeFields: ["id"],
+      // snake_case and camelCase names become separate words: list_commits -> list commits
+      tokenize: text =>
+        text
+          .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+          .split(/[\s\p{P}\p{S}_]+/u)
+          .filter(Boolean),
       searchOptions: {
-        boost: { name: 2, description: 1 },
+        boost: { name: 3, serverId: 1.5, description: 1, parameters: 0.5 },
         fuzzy: 0.2,
-        prefix: true
+        prefix: true,
+        combineWith: "OR"
       }
     });
   }
 
-  /**
-   * Register and index a batch of tools from a downstream server.
-   */
   public registerTools(tools: DownstreamTool[]): void {
     const docs: IndexedToolDocument[] = [];
-
     for (const tool of tools) {
+      if (this.toolRegistry.has(tool.namespacedName)) continue;
       this.toolRegistry.set(tool.namespacedName, tool);
-
-      const paramNames = Object.keys(tool.inputSchema?.properties || {}).join(" ");
       docs.push({
         id: tool.namespacedName,
         serverId: tool.serverId,
         name: tool.name,
         description: tool.description || "",
-        parameters: paramNames
+        parameters: Object.keys(tool.inputSchema?.properties || {}).join(" ")
       });
     }
-
     this.miniSearch.addAll(docs);
   }
 
   /**
-   * Query the index and return compact TypeScript signatures for top matching tools.
+   * Query the index and return compact signatures for the top matches.
+   * `minScore` is relative: matches scoring below minScore * best are dropped.
    */
-  public search(query: string, maxResults = 5): CompactToolSignature[] {
-    const results = this.miniSearch.search(query);
-    const topMatches = results.slice(0, maxResults);
+  public search(
+    query: string,
+    maxResults = 5,
+    minScore = 0,
+    filter?: (tool: DownstreamTool) => boolean
+  ): CompactToolSignature[] {
+    const expanded = expandQuery(query);
+    const results = this.miniSearch.search(expanded, {
+      filter: filter ? r => { const t = this.toolRegistry.get(r.id); return !!t && filter(t); } : undefined
+    });
+    if (results.length === 0) return [];
+    const floor = results[0].score * minScore;
 
-    return topMatches
-      .map(match => {
-        const tool = this.toolRegistry.get(match.id);
-        if (!tool) return null;
-
+    return results
+      .filter(r => r.score >= floor)
+      .slice(0, maxResults)
+      .map(match => this.toolRegistry.get(match.id))
+      .filter((tool): tool is DownstreamTool => tool !== undefined)
+      .map(tool => {
         const signatureText = SchemaTranspiler.transpileToTypeScript(tool);
         return {
           namespacedName: tool.namespacedName,
           signatureText,
           estimatedTokens: SchemaTranspiler.estimateTokens(signatureText)
         };
-      })
-      .filter((item): item is CompactToolSignature => item !== null);
+      });
   }
 
   public getTool(namespacedName: string): DownstreamTool | undefined {
@@ -82,4 +137,10 @@ export class ToolDiscoveryEngine {
   public getAllTools(): DownstreamTool[] {
     return Array.from(this.toolRegistry.values());
   }
+}
+
+export function expandQuery(query: string): string {
+  const words = query.toLowerCase().split(/[\s\p{P}]+/u).filter(Boolean);
+  const extra = words.flatMap(w => SYNONYMS[w] ?? []);
+  return [...words, ...extra].join(" ");
 }
