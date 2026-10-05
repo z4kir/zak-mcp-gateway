@@ -19,6 +19,16 @@ class TooComplexError extends Error {}
  * back to the full minified JSON Schema.
  */
 export class SchemaTranspiler {
+  /** One line, no comments: `github__list_commits({ owner: string, repo: string, ... })`. */
+  public static oneLine(tool: DownstreamTool): string {
+    try {
+      return `${tool.namespacedName}(${this.renderParams(tool.inputSchema, false)})`;
+    } catch (err) {
+      if (!(err instanceof TooComplexError)) throw err;
+      return `${tool.namespacedName}(args) // complex: use mcp_search_tools for the schema`;
+    }
+  }
+
   public static transpileToTypeScript(tool: DownstreamTool): string {
     const header = tool.description
       ? `// [${tool.serverId}] ${clip(collapse(tool.description), MAX_TOOL_DESCRIPTION)}\n`
@@ -34,7 +44,7 @@ export class SchemaTranspiler {
     }
   }
 
-  private static renderParams(schema: ToolInputSchema | undefined): string {
+  private static renderParams(schema: ToolInputSchema | undefined, withNotes = true): string {
     const props = schema?.properties ?? {};
     const required = new Set(schema?.required ?? []);
     const entries = Object.entries(props);
@@ -44,7 +54,7 @@ export class SchemaTranspiler {
       const opt = required.has(name) ? "" : "?";
       const type = this.resolveType(prop, 1);
       const def = prop.default !== undefined ? ` = ${JSON.stringify(prop.default)}` : "";
-      return { code: `${safeKey(name)}${opt}: ${type}${def}`, note: this.paramNote(prop) };
+      return { code: `${safeKey(name)}${opt}: ${type}${def}`, note: withNotes ? this.paramNote(prop) : "" };
     });
 
     if (lines.every(l => !l.note)) {

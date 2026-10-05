@@ -53,6 +53,8 @@ export interface DownstreamTool {
 export interface CompactToolSignature {
   namespacedName: string;
   signatureText: string;
+  /** First sentence of the description, at most ~12 words. */
+  summary: string;
   estimatedTokens: number;
 }
 
@@ -61,6 +63,8 @@ export interface ToolCallPayload {
   arguments: Record<string, unknown>;
   project_fields?: string[]; // Egress projection mask
   confirm?: boolean; // Explicit confirmation for write tools
+  fresh?: boolean; // Skip the cache for this read
+  full?: boolean; // Return the full write reply instead of a receipt
 }
 
 /** Minimal shape of an MCP CallToolResult that the gateway works with. */

@@ -1,5 +1,19 @@
 import { z } from "zod";
 
+/** Per-server overrides for result handling (idea: per-server result limits). */
+export const ServerResultsConfigSchema = z.object({
+  inlineTokenLimit: z.number().positive().optional(),
+  maxStringChars: z.number().positive().optional(),
+  /**
+   * full  = projection, noise keys, nulls, TSV, clipping, handles (raw-JSON servers)
+   * light = projection + compact JSON only; a handle only when over the limit (compact servers)
+   * off   = pass results through untouched
+   */
+  distill: z.enum(["full", "light", "off"]).default("full"),
+  /** Reply to successful writes with {ok, id...} and keep the full echo behind a handle. */
+  writeReceipts: z.boolean().optional()
+});
+
 export const DownstreamServerConfigSchema = z.object({
   /** stdio servers */
   command: z.string().optional(),
@@ -16,6 +30,25 @@ export const DownstreamServerConfigSchema = z.object({
   projections: z.record(z.array(z.string())).default({}),
   /** Extra key patterns to drop from this server's JSON results (added to results.dropKeys). */
   dropKeys: z.array(z.string()).default([]),
+  results: ServerResultsConfigSchema.default({}),
+  /** Extra search synonyms for this server's vocabulary, e.g. { "ticket": ["incident"] }. */
+  synonyms: z.record(z.array(z.string())).default({}),
+  /** Append this server's own MCP instructions to the gateway's instructions (capped). */
+  forwardInstructions: z.boolean().default(true),
+  /**
+   * Arguments injected when the agent omits them, per tool, e.g. page size or server-side
+   * field selection: { "list_records": { "limit": 20, "fields": "id,name" } }.
+   */
+  defaultArgs: z.record(z.record(z.unknown())).default({}),
+  /** Override read/write classification per tool name. */
+  access: z.record(z.enum(["read", "write"])).default({}),
+  /** Treat a read tool as a write when its arguments match, e.g. { "fetch_page": { "save": true } }. */
+  writeIf: z.record(z.record(z.unknown())).default({}),
+  /** Exact-match cache for this server's read tools. */
+  cache: z.boolean().default(true),
+  cacheTtlSeconds: z.number().positive().optional(),
+  /** Servers sharing a backend: a write on any of them clears the cache of all. */
+  cacheGroup: z.string().optional(),
   connectTimeoutMs: z.number().positive().default(60_000)
 });
 
@@ -29,8 +62,19 @@ export const GatewayDiscoveryConfigSchema = z.object({
   maxSearchResults: z.number().positive().default(5),
   /** Drop matches scoring below this fraction of the best match (0..1). */
   minScore: z.number().min(0).max(1).default(0.2),
-  /** Put a one-line-per-server tool name index into the MCP `instructions`. */
-  catalogInInstructions: z.boolean().default(true)
+  /** Legacy switch; `catalog` wins when set. */
+  catalogInInstructions: z.boolean().default(true),
+  /**
+   * Tool index in the instructions:
+   * names = every tool name · groups = tool families per server · servers = server list · off
+   */
+  catalog: z.enum(["names", "groups", "servers", "off"]).optional(),
+  /** How many search hits get a full signature; the rest are name + short summary. */
+  fullSignatures: z.number().int().nonnegative().default(1),
+  /** Put one-line signatures of the N most-used tools (from the stats log) in the instructions. */
+  hotSignatures: z.number().int().nonnegative().default(0),
+  /** Max characters of each downstream server's own instructions to forward (0 = none). */
+  serverInstructionsMaxChars: z.number().int().nonnegative().default(600)
 });
 
 export const GatewayResultsConfigSchema = z.object({
@@ -46,7 +90,13 @@ export const GatewayResultsConfigSchema = z.object({
   /** Key patterns dropped from JSON results (glob, matched against the key name). */
   dropKeys: z.array(z.string()).default(["*_url", "node_id", "gravatar_id", "_links"]),
   /** Keys never dropped even if a dropKeys pattern matches. */
-  keepKeys: z.array(z.string()).default(["html_url"])
+  keepKeys: z.array(z.string()).default(["html_url"]),
+  /** Default for write receipts (servers can override). */
+  writeReceipts: z.boolean().default(false),
+  /** Keys copied into a write receipt when present. */
+  receiptKeys: z.array(z.string()).default(["id", "uuid", "sys_id", "number", "key", "sha", "name", "html_url", "url", "status", "state"]),
+  /** Reply "same as rN" when a result is byte-identical to a stored one. */
+  dedupe: z.boolean().default(false)
 });
 
 export const GatewaySafetyConfigSchema = z.object({
@@ -70,23 +120,45 @@ export const GatewayStatsConfigSchema = z.object({
 });
 
 export const GatewayCodeModeConfigSchema = z.object({
-  /** Expose mcp_run_code. NOT a security sandbox: only enable for trusted agents. */
+  /** Expose mcp_run_code (read tools only). */
   enabled: z.boolean().default(false),
+  /** process = separate Node process with the permission model (default); vm = in-process, trusted use only. */
+  isolation: z.enum(["process", "vm"]).default("process"),
   timeoutMs: z.number().positive().default(30_000),
-  maxToolCalls: z.number().positive().default(25)
+  maxToolCalls: z.number().positive().default(25),
+  memoryMb: z.number().positive().default(64)
+});
+
+export const GatewayKnowledgeConfigSchema = z.object({
+  /** Rules text sent in the instructions of every session. */
+  rules: z.string().optional(),
+  /** File with rules (relative to the config file). */
+  rulesFile: z.string().optional(),
+  /** Folder of skills: <name>/SKILL.md or <name>.md, optional front matter name/description. */
+  skillsDir: z.string().optional(),
+  maxRulesChars: z.number().positive().default(6000)
+});
+
+export const GatewayClientFeaturesSchema = z.object({
+  /** Forward downstream elicitation requests (ask the user) to the agent's client. */
+  elicitation: z.boolean().default(false),
+  /** Forward downstream sampling requests (ask the model) to the agent's client. */
+  sampling: z.boolean().default(false)
 });
 
 export const GatewayConfigSchema = z.object({
   gateway: z.object({
     name: z.string().default("zak-mcp-gateway"),
-    version: z.string().default("0.2.0"),
+    version: z.string().default("0.3.0"),
     logLevel: z.enum(["debug", "info", "warn", "error"]).default("info"),
     cache: GatewayCacheConfigSchema.default({}),
     discovery: GatewayDiscoveryConfigSchema.default({}),
     results: GatewayResultsConfigSchema.default({}),
     safety: GatewaySafetyConfigSchema.default({}),
     stats: GatewayStatsConfigSchema.default({}),
-    codeMode: GatewayCodeModeConfigSchema.default({})
+    codeMode: GatewayCodeModeConfigSchema.default({}),
+    knowledge: GatewayKnowledgeConfigSchema.default({}),
+    clientFeatures: GatewayClientFeaturesSchema.default({})
   }).passthrough().default({}),
   mcpServers: z.record(DownstreamServerConfigSchema).default({})
 }).passthrough();
@@ -95,3 +167,4 @@ export type ValidatedGatewayConfig = z.infer<typeof GatewayConfigSchema>;
 export type DownstreamServerConfig = z.infer<typeof DownstreamServerConfigSchema>;
 export type GatewayResultsConfig = z.infer<typeof GatewayResultsConfigSchema>;
 export type GatewaySafetyConfig = z.infer<typeof GatewaySafetyConfigSchema>;
+export type DistillMode = z.infer<typeof ServerResultsConfigSchema>["distill"];

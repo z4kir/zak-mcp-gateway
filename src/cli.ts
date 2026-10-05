@@ -75,6 +75,35 @@ async function report(args: string[]): Promise<void> {
   const raw = sum(calls, "rawTokens");
   const sent = sum(calls, "sentTokens");
   console.log(`\n  TOTAL raw ~${raw} tokens, sent ~${sent} tokens, saved ${pct(raw - sent, raw)} (search/get_result overhead included in "sent")`);
+
+  // Turns and overhead: every tool call is one more model request that re-sends the history.
+  const byVia = new Map<string, CallRecord[]>();
+  for (const c of calls) {
+    if (!byVia.has(c.via)) byVia.set(c.via, []);
+    byVia.get(c.via)!.push(c);
+  }
+  console.log("\nTurns by kind (each is one model request):");
+  for (const [via, cs] of [...byVia].sort((a, b) => b[1].length - a[1].length)) {
+    console.log(`  ${via.padEnd(12)} ${String(cs.length).padStart(5)} calls  ${String(sum(cs, "sentTokens")).padStart(8)} tokens sent`);
+  }
+
+  // Learned default fields: what agents keep asking for from stored results, per tool.
+  const asked = new Map<string, Map<string, number>>();
+  for (const c of calls) {
+    if (c.via !== "get_result" || !c.fieldsUsed?.length) continue;
+    if (!asked.has(c.tool)) asked.set(c.tool, new Map());
+    for (const f of c.fieldsUsed) asked.get(c.tool)!.set(f, (asked.get(c.tool)!.get(f) ?? 0) + 1);
+  }
+  const suggestions = [...asked]
+    .map(([tool, fields]) => [tool, [...fields].filter(([, n]) => n >= 2).map(([f]) => f)] as const)
+    .filter(([, fields]) => fields.length > 0);
+  if (suggestions.length) {
+    console.log("\nSuggested default fields (asked for 2+ times; copy into the server's \"projections\" if they fit):");
+    for (const [tool, fields] of suggestions) {
+      const [server, name] = tool.split("__");
+      console.log(`  ${server}.projections.${name}: ${JSON.stringify(fields)}`);
+    }
+  }
 }
 
 async function main() {

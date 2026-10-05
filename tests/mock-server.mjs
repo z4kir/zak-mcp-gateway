@@ -2,7 +2,10 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
-const server = new Server({ name: "mock-server", version: "1.0.0" }, { capabilities: { tools: {} } });
+const server = new Server(
+  { name: "mock-server", version: "1.0.0" },
+  { capabilities: { tools: {} }, instructions: "Mock DB notes: table names are lowercase; ids are integers." }
+);
 let readCalls = 0;
 const writes = [];
 
@@ -40,6 +43,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: "mock_read_log",
       description: "Reads a long plain-text log file",
       inputSchema: { type: "object", properties: { lines: { type: "number" } } }
+    },
+    {
+      name: "mock_compact_list",
+      description: "Lists records in an already compact format",
+      inputSchema: { type: "object", properties: { n: { type: "number" } } }
+    },
+    {
+      name: "mock_get_approval",
+      description: "Asks the user to approve reusing a cached result (elicitation)",
+      inputSchema: { type: "object", properties: {} }
+    },
+    {
+      name: "mock_get_summary",
+      description: "Asks the client model to summarize a text (sampling)",
+      inputSchema: { type: "object", properties: { text: { type: "string" } } }
     },
     {
       name: "mock_read_calls",
@@ -82,6 +100,24 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
     const n = typeof args.lines === "number" ? args.lines : 3000;
     const text = Array.from({ length: n }, (_, i) => `${i + 1} INFO request handled path=/api/v1/item/${i} status=${i % 97 === 0 ? 500 : 200}`).join("\n");
     return { content: [{ type: "text", text }] };
+  }
+  if (name === "mock_compact_list") {
+    const n = typeof args.n === "number" ? args.n : 400;
+    const rows = Array.from({ length: n }, (_, i) => ({ id: i, t: `item ${i}`, s: i % 3 ? "open" : "done" }));
+    return { content: [{ type: "text", text: JSON.stringify(rows) }] };
+  }
+  if (name === "mock_get_approval") {
+    if (!server.getClientCapabilities()?.elicitation) return { content: [{ type: "text", text: "no elicitation support" }] };
+    const answer = await server.elicitInput({
+      message: "Reuse the cached result?",
+      requestedSchema: { type: "object", properties: { approve: { type: "boolean" } }, required: ["approve"] }
+    });
+    return { content: [{ type: "text", text: JSON.stringify(answer) }] };
+  }
+  if (name === "mock_get_summary") {
+    if (!server.getClientCapabilities()?.sampling) return { content: [{ type: "text", text: "no sampling support" }] };
+    const out = await server.createMessage({ messages: [{ role: "user", content: { type: "text", text: `Summarize: ${args.text}` } }], maxTokens: 50 });
+    return { content: [{ type: "text", text: `summary=${out.content.text}` }] };
   }
   if (name === "mock_read_calls") {
     return { content: [{ type: "text", text: JSON.stringify({ readCalls }) }] };

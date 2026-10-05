@@ -3,12 +3,19 @@ import { GoogleGenAI, type Chat, type FunctionCall, type Part } from "@google/ge
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { NextResponse } from "next/server";
+import { trimHistory, unverifiedValues } from "./harness";
 
 /**
  * Test harness for the gateway: the same Gemini agent loop runs against
  *   "gateway" -> zak-mcp-gateway (meta-tools, distilled results)
  *   "direct"  -> zak-mcp-gateway --passthrough (every raw tool schema and raw results, i.e. standard MCP)
  * using the same config/servers.json, so token numbers are a fair A/B comparison.
+ *
+ * Harness options for weaker models (gateway mode):
+ *   preload  search the first message up front; put the best signatures (and a matching skill) in the prompt
+ *   focused  every question gets its top matching tools as real functions instead of search-then-call
+ *   trim     tool results from earlier turns are shortened in the history (every turn re-sends history)
+ *   verify   values in the answer (ids, SHAs, numbers) must appear in tool results, else one correction round
  */
 type Mode = "gateway" | "direct";
 
@@ -17,17 +24,31 @@ const GATEWAY_CLI = path.join(GATEWAY_ROOT, "dist", "cli.js");
 const GATEWAY_CONFIG = process.env.GATEWAY_CONFIG ?? path.join(GATEWAY_ROOT, "config", "servers.json");
 const DEFAULT_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.8-flash";
 const MAX_MODEL_CALLS = 12;
+const FOCUSED_TOOLS = 5;
+
+interface McpTool {
+  name: string;
+  description?: string;
+  inputSchema: Record<string, unknown>;
+}
 
 interface McpConnection {
   client: Client;
-  tools: { name: string; description?: string; inputSchema: Record<string, unknown> }[];
+  tools: McpTool[];
   instructions: string;
+}
+
+interface ChatState {
+  chat: Chat;
+  ai: GoogleGenAI;
+  model: string;
+  systemInstruction: string;
 }
 
 // Survive Next.js hot reloads without spawning duplicate gateway processes.
 const state = globalThis as unknown as {
   __zakConnections?: Map<Mode, Promise<McpConnection>>;
-  __zakChats?: Map<string, Chat>;
+  __zakChats?: Map<string, ChatState>;
 };
 const connections = (state.__zakConnections ??= new Map());
 const chats = (state.__zakChats ??= new Map());
@@ -40,7 +61,7 @@ function getConnection(mode: Mode): Promise<McpConnection> {
       const client = new Client({ name: `agent-ui-${mode}`, version: "1.0.0" }, { capabilities: {} });
       await client.connect(new StdioClientTransport({ command: process.execPath, args, stderr: "inherit" }));
       const { tools } = await client.listTools();
-      return { client, tools: tools as McpConnection["tools"], instructions: client.getInstructions() ?? "" };
+      return { client, tools: tools as McpTool[], instructions: client.getInstructions() ?? "" };
     })();
     conn.catch(() => connections.delete(mode)); // allow a retry after a failed start
     connections.set(mode, conn);
@@ -55,6 +76,13 @@ function toGeminiSchema(schema: Record<string, unknown>): unknown {
   return rest;
 }
 
+function declarations(tools: McpTool[]) {
+  return [{ functionDeclarations: tools.map(t => ({ name: t.name, description: t.description ?? "", parametersJsonSchema: toGeminiSchema(t.inputSchema) })) }];
+}
+
+const textOf = (r: unknown) =>
+  (((r as { content?: unknown }).content as { type: string; text?: string }[]) ?? []).filter(c => c.type === "text").map(c => c.text ?? "").join("\n");
+
 interface ToolCallLog {
   name: string;
   args: string;
@@ -68,7 +96,12 @@ export async function POST(req: Request) {
     const message: string = body.message;
     const mode: Mode = body.mode === "direct" ? "direct" : "gateway";
     const sessionId: string = body.sessionId ?? "default";
-    const preload: boolean = body.preload !== false;
+    const opts = {
+      preload: body.preload !== false,
+      focused: body.focused === true,
+      trim: body.trim !== false,
+      verify: body.verify !== false
+    };
     const apiKey: string | undefined = body.apiKey || process.env.GEMINI_API_KEY;
     const model: string = typeof body.model === "string" && body.model ? body.model : DEFAULT_MODEL;
 
@@ -79,42 +112,65 @@ export async function POST(req: Request) {
 
     const conn = await getConnection(mode);
     const chatKey = `${sessionId}:${mode}:${model}`;
-    let chat = chats.get(chatKey);
-    let preloaded: string | undefined;
+    let st = chats.get(chatKey);
+    let preloaded: string[] = [];
+    let skill: string | undefined;
+    let trimmedResults = 0;
 
-    if (!chat) {
+    const gatewayHelpers = mode === "gateway";
+    // Focused tools: this question's best tools as real functions (gateway mode only).
+    let focusedTools: McpTool[] = [];
+    if (gatewayHelpers && opts.focused) {
+      const r = await conn.client.callTool({ name: "mcp_search_tools", arguments: { query: message, limit: FOCUSED_TOOLS, detail: "schema" } });
+      try {
+        focusedTools = JSON.parse(textOf(r)) as McpTool[];
+      } catch {
+        focusedTools = [];
+      }
+    }
+
+    if (!st) {
       let systemInstruction = conn.instructions;
-      // Tool prediction: search with the user's first message and put the best signatures in
-      // the system prompt, saving the model a search round trip.
-      if (mode === "gateway" && preload) {
+      if (gatewayHelpers && opts.preload) {
         const found = await conn.client.callTool({ name: "mcp_search_tools", arguments: { query: message, limit: 3 } });
-        const text = (found.content as { type: string; text?: string }[]).map(c => c.text ?? "").join("\n");
-        if (!found.isError && !text.startsWith("No tools matched")) {
-          preloaded = text;
-          systemInstruction += `\n\nLikely tools for this request (call them directly with mcp_call_tool):\n${text}`;
+        const text = textOf(found);
+        const tools = text.replace(/^Relevant skill: .*\n\n/, "");
+        if (!opts.focused && !found.isError && !tools.startsWith("No tools matched")) {
+          preloaded = tools.split("\n").filter(l => /^\w+__\w+\(/.test(l)).map(l => l.split("(")[0]);
+          systemInstruction += `\n\nLikely tools for this request (call them directly with mcp_call_tool):\n${tools}`;
+        }
+        // A skill matching the first request: load it up front so a weak model doesn't have to decide.
+        const name = text.match(/^Relevant skill: (\S+)/)?.[1];
+        if (name) {
+          const s = await conn.client.callTool({ name: "mcp_get_skill", arguments: { name } });
+          if (!s.isError) {
+            skill = name;
+            systemInstruction += `\n\nFollow this skill for the request:\n${textOf(s)}`;
+          }
         }
       }
       const ai = new GoogleGenAI({ apiKey });
-      chat = ai.chats.create({
+      st = { ai, model, systemInstruction, chat: ai.chats.create({ model, config: { systemInstruction: systemInstruction || undefined, tools: declarations([...conn.tools, ...focusedTools]) } }) };
+      chats.set(chatKey, st);
+    } else if (opts.trim || opts.focused) {
+      // Rebuild the chat: shortened old results and/or this question's focused tools.
+      let history = st.chat.getHistory();
+      if (opts.trim) {
+        const t = trimHistory(history);
+        history = t.history;
+        trimmedResults = t.trimmed;
+      }
+      st.chat = st.ai.chats.create({
         model,
-        config: {
-          systemInstruction: systemInstruction || undefined,
-          tools: [
-            {
-              functionDeclarations: conn.tools.map(t => ({
-                name: t.name,
-                description: t.description ?? "",
-                parametersJsonSchema: toGeminiSchema(t.inputSchema)
-              }))
-            }
-          ]
-        }
+        history,
+        config: { systemInstruction: st.systemInstruction || undefined, tools: declarations([...conn.tools, ...focusedTools]) }
       });
-      chats.set(chatKey, chat);
     }
+    const chat = st.chat;
 
     const usage = { inputTokens: 0, cachedTokens: 0, outputTokens: 0, modelCalls: 0 };
     const toolCalls: ToolCallLog[] = [];
+    const evidence: string[] = [message];
     const record = (res: Awaited<ReturnType<Chat["sendMessage"]>>) => {
       const u = res.usageMetadata;
       usage.modelCalls++;
@@ -123,33 +179,47 @@ export async function POST(req: Request) {
       usage.outputTokens += (u?.candidatesTokenCount ?? 0) + (u?.thoughtsTokenCount ?? 0);
     };
 
-    let response = await sendWithRetry(chat, { message });
-    record(response);
-
-    let calls: FunctionCall[] = response.functionCalls ?? [];
-    while (calls.length > 0 && usage.modelCalls < MAX_MODEL_CALLS) {
-      // Answer every function call of this turn (Gemini may ask for several at once).
-      const parts: Part[] = await Promise.all(
-        calls.map(async call => {
-          const name = call.name ?? "";
-          try {
-            const result = await conn.client.callTool({ name, arguments: (call.args ?? {}) as Record<string, unknown> });
-            const text = (result.content as { type: string; text?: string }[])
-              .filter(c => c.type === "text")
-              .map(c => c.text ?? "")
-              .join("\n");
-            toolCalls.push({ name, args: JSON.stringify(call.args ?? {}).slice(0, 300), resultChars: text.length, isError: !!result.isError });
-            return { functionResponse: { id: call.id, name, response: result.isError ? { error: text } : { output: text } } };
-          } catch (err) {
-            const msg = (err as Error).message;
-            toolCalls.push({ name, args: JSON.stringify(call.args ?? {}).slice(0, 300), resultChars: msg.length, isError: true });
-            return { functionResponse: { id: call.id, name, response: { error: msg } } };
-          }
-        })
-      );
-      response = await sendWithRetry(chat, { message: parts });
+    const runLoop = async (first: Parameters<Chat["sendMessage"]>[0]) => {
+      let response = await sendWithRetry(chat, first);
       record(response);
-      calls = response.functionCalls ?? [];
+      let calls: FunctionCall[] = response.functionCalls ?? [];
+      while (calls.length > 0 && usage.modelCalls < MAX_MODEL_CALLS) {
+        // Answer every function call of this turn (Gemini may ask for several at once).
+        const parts: Part[] = await Promise.all(
+          calls.map(async call => {
+            const name = call.name ?? "";
+            const argsText = JSON.stringify(call.args ?? {}).slice(0, 300);
+            try {
+              const result = await conn.client.callTool({ name, arguments: (call.args ?? {}) as Record<string, unknown> });
+              const text = textOf(result);
+              evidence.push(text);
+              toolCalls.push({ name, args: argsText, resultChars: text.length, isError: !!result.isError });
+              return { functionResponse: { id: call.id, name, response: result.isError ? { error: text } : { output: text } } };
+            } catch (err) {
+              const msg = (err as Error).message;
+              toolCalls.push({ name, args: argsText, resultChars: msg.length, isError: true });
+              return { functionResponse: { id: call.id, name, response: { error: msg } } };
+            }
+          })
+        );
+        response = await sendWithRetry(chat, { message: parts });
+        record(response);
+        calls = response.functionCalls ?? [];
+      }
+      return response;
+    };
+
+    let response = await runLoop({ message });
+    let verifier: { checked: boolean; unverified: string[]; corrected: boolean } = { checked: false, unverified: [], corrected: false };
+    if (opts.verify && toolCalls.length > 0 && response.text) {
+      const missing = unverifiedValues(response.text, evidence.join("\n"));
+      verifier = { checked: true, unverified: missing, corrected: false };
+      if (missing.length > 0) {
+        response = await runLoop({
+          message: `Check your answer: these values do not appear in any tool result: ${missing.join(", ")}. Verify them with a tool or remove them, then give the corrected answer only. If a value was computed by you, say so.`
+        });
+        verifier.corrected = true;
+      }
     }
 
     return NextResponse.json({
@@ -158,8 +228,11 @@ export async function POST(req: Request) {
       text: response.text ?? "(no text response)",
       usage,
       toolCalls,
-      toolDefinitions: { count: conn.tools.length, chars: JSON.stringify(conn.tools).length + conn.instructions.length },
-      preloaded: preloaded ? preloaded.split("\n").filter(l => /^\w+__\w+\(/.test(l)).map(l => l.split("(")[0]) : []
+      toolDefinitions: { count: conn.tools.length + focusedTools.length, chars: JSON.stringify([...conn.tools, ...focusedTools]).length + conn.instructions.length },
+      preloaded: opts.focused ? focusedTools.map(t => t.name) : preloaded,
+      skill,
+      trimmedResults,
+      verifier
     });
   } catch (error) {
     console.error("Agent API Error:", error);

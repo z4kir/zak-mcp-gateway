@@ -49,7 +49,7 @@ export class ExactMatchShaCache {
     return entry.result as T;
   }
 
-  public set<T>(key: string, result: T, serverId = "", ttlMs = this.defaultTtlMs): void {
+  public set<T>(key: string, result: T, serverId = "", ttlMs: number = this.defaultTtlMs): void {
     this.cache.delete(key);
     this.cache.set(key, { result, serverId, expiresAt: Date.now() + ttlMs });
     while (this.cache.size > this.maxEntries) {

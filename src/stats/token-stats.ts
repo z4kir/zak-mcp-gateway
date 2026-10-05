@@ -28,6 +28,8 @@ export interface CallRecord {
   sentTokens: number;
   cacheHit: boolean;
   blocked?: string;
+  /** For get_result: the field paths the agent asked for (feeds suggested default fields). */
+  fieldsUsed?: string[];
   ms: number;
 }
 
@@ -72,6 +74,30 @@ export class TokenStats {
         this.logPath = undefined;
       }
     }
+  }
+
+  /** Most-called downstream tools across all logged sessions (for hot signatures). */
+  public topTools(n: number): string[] {
+    if (!this.logPath || n <= 0) return [];
+    let text = "";
+    try {
+      text = fs.readFileSync(this.logPath, "utf-8");
+    } catch {
+      return [];
+    }
+    const counts = new Map<string, number>();
+    for (const line of text.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const r = JSON.parse(line) as StatsRecord;
+        if (r.type === "call" && (["call", "pinned", "batch", "direct"].includes(r.via)) && !r.blocked) {
+          counts.set(r.tool, (counts.get(r.tool) ?? 0) + 1);
+        }
+      } catch {
+        /* skip a broken line */
+      }
+    }
+    return [...counts].sort((a, b) => b[1] - a[1]).slice(0, n).map(([tool]) => tool);
   }
 
   public recordSession(r: Omit<SessionRecord, "type" | "ts" | "session">): void {

@@ -39,7 +39,7 @@ test("gateway over MCP: tools/list, search, call, cache, confirm, handles, stats
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map(x => x.name), ["mcp_search_tools", "mcp_call_tool", "mcp_get_result"]);
   const listTokens = estimateTokens(JSON.stringify({ tools })) + estimateTokens(client.getInstructions() ?? "");
-  assert.ok(listTokens < 500, `client sees ${listTokens} tokens of tool definitions`);
+  assert.ok(listTokens < 580, `client sees ${listTokens} tokens of tool definitions`);
   assert.match(client.getInstructions(), /testdb \(prefix testdb__\): mock_read_db, mock_write_db/);
 
   // search returns compact signatures
@@ -144,7 +144,7 @@ test("passthrough baseline exposes raw schemas and raw results", async t => {
   const { client, call, close } = await startGateway({}, { passthrough: true });
   t.after(close);
   const { tools } = await client.listTools();
-  assert.equal(tools.length, 5);
+  assert.equal(tools.length, 8);
   assert.ok(tools[0].inputSchema.$schema, "schemas are untouched");
   const r = await call("testdb__mock_read_db", { table: "users" });
   assert.match(r.text, /"avatar_url"/);

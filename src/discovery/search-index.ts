@@ -62,6 +62,7 @@ const SYNONYMS: Record<string, string[]> = {
 export class ToolDiscoveryEngine {
   private miniSearch: MiniSearch<IndexedToolDocument>;
   private toolRegistry = new Map<string, DownstreamTool>();
+  private synonyms: Record<string, string[]> = { ...SYNONYMS };
 
   constructor() {
     this.miniSearch = new MiniSearch<IndexedToolDocument>({
@@ -80,6 +81,14 @@ export class ToolDiscoveryEngine {
         combineWith: "OR"
       }
     });
+  }
+
+  /** Add domain vocabulary (from server config) to the built-in synonym map. */
+  public addSynonyms(extra: Record<string, string[]>): void {
+    for (const [word, targets] of Object.entries(extra)) {
+      const key = word.toLowerCase();
+      this.synonyms[key] = Array.from(new Set([...(this.synonyms[key] ?? []), ...targets.map(t => t.toLowerCase())]));
+    }
   }
 
   public registerTools(tools: DownstreamTool[]): void {
@@ -108,7 +117,7 @@ export class ToolDiscoveryEngine {
     minScore = 0,
     filter?: (tool: DownstreamTool) => boolean
   ): CompactToolSignature[] {
-    const expanded = expandQuery(query);
+    const expanded = expandQuery(query, this.synonyms);
     const results = this.miniSearch.search(expanded, {
       filter: filter ? r => { const t = this.toolRegistry.get(r.id); return !!t && filter(t); } : undefined
     });
@@ -125,6 +134,7 @@ export class ToolDiscoveryEngine {
         return {
           namespacedName: tool.namespacedName,
           signatureText,
+          summary: summarizeDescription(tool.description),
           estimatedTokens: SchemaTranspiler.estimateTokens(signatureText)
         };
       });
@@ -139,8 +149,15 @@ export class ToolDiscoveryEngine {
   }
 }
 
-export function expandQuery(query: string): string {
+export function expandQuery(query: string, synonyms: Record<string, string[]> = SYNONYMS): string {
   const words = query.toLowerCase().split(/[\s\p{P}]+/u).filter(Boolean);
-  const extra = words.flatMap(w => SYNONYMS[w] ?? []);
+  const extra = words.flatMap(w => synonyms[w] ?? []);
   return [...words, ...extra].join(" ");
+}
+
+/** First sentence of a description, capped at ~12 words, for compact search listings. */
+export function summarizeDescription(description: string): string {
+  const first = description.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s/)[0] ?? "";
+  const words = first.replace(/[.!?]$/, "").split(" ");
+  return words.length > 12 ? `${words.slice(0, 12).join(" ")}…` : words.join(" ");
 }

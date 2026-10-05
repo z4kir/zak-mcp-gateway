@@ -1,14 +1,31 @@
 {
   "gateway": {
     "name": "zak-mcp-gateway",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "logLevel": "info",
     "cache": { "enabled": true, "exactMatchTtlSeconds": 300, "maxEntries": 1000 },
-    "discovery": { "maxSearchResults": 5, "minScore": 0.2, "catalogInInstructions": true },
-    "results": { "inlineTokenLimit": 1500, "previewRows": 10, "maxStringChars": 600, "maxStored": 50, "tsv": true },
+    "discovery": {
+      "maxSearchResults": 5,
+      "minScore": 0.2,
+      "catalog": "names",
+      "fullSignatures": 1,
+      "hotSignatures": 0,
+      "serverInstructionsMaxChars": 600
+    },
+    "results": {
+      "inlineTokenLimit": 1500,
+      "previewRows": 10,
+      "maxStringChars": 600,
+      "maxStored": 50,
+      "tsv": true,
+      "writeReceipts": false,
+      "dedupe": false
+    },
     "safety": { "readOnly": false, "confirmWrites": true, "allow": [], "deny": [], "warnOnInjection": true },
     "stats": { "enabled": true, "logFile": "../.zak-gateway/stats.jsonl", "sessionTokenBudget": 0 },
-    "codeMode": { "enabled": false, "timeoutMs": 30000, "maxToolCalls": 25 }
+    "codeMode": { "enabled": false, "isolation": "process", "timeoutMs": 30000, "maxToolCalls": 25, "memoryMb": 64 },
+    "knowledge": { "rulesFile": "rules.md", "skillsDir": "skills" },
+    "clientFeatures": { "elicitation": false, "sampling": false }
   },
   "mcpServers": {
     "github": {
@@ -18,12 +35,20 @@
       "dropKeys": ["url", "permissions", "reactions", "performed_via_github_app", "author_association", "site_admin", "user_view_type", "verification", "sub_issues_summary"],
       "projections": {
         "list_commits": ["sha", "commit.message", "commit.author.name", "commit.author.date", "html_url"],
-        "list_issues": ["number", "title", "state", "user.login", "labels.name", "comments", "created_at", "updated_at", "html_url"]
-      }
+        "list_issues": ["number", "title", "state", "user.login", "labels.name", "comments", "created_at", "updated_at", "html_url", "pull_request.html_url"]
+      },
+      "synonyms": { "pr": ["pull", "request"] }
     },
-    "github-remote": {
-      "url": "https://api.githubcopilot.com/mcp/",
-      "headers": { "Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}" }
+    "compact-server": {
+      "url": "https://mcp.example.internal/mcp",
+      "headers": { "Authorization": "Bearer ${COMPACT_SERVER_TOKEN}" },
+      "results": { "inlineTokenLimit": 8000, "distill": "light", "writeReceipts": true },
+      "defaultArgs": { "list_records": { "limit": 20 } },
+      "access": { "open_session": "write" },
+      "writeIf": { "fetch_page": { "save": true } },
+      "cacheGroup": "backend-a",
+      "cacheTtlSeconds": 60,
+      "synonyms": { "ticket": ["incident"], "ci": ["cmdb"] }
     },
     "filesystem": {
       "command": "npx",
@@ -33,7 +58,8 @@
     "postgres": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-postgres", "${DATABASE_URL}"],
-      "readOnly": true
+      "readOnly": true,
+      "cache": false
     }
   }
 }

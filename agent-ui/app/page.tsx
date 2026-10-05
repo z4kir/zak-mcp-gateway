@@ -18,6 +18,9 @@ interface TurnResult {
   toolCalls: { name: string; args: string; resultChars: number; isError: boolean }[];
   toolDefinitions: { count: number; chars: number };
   preloaded: string[];
+  skill?: string;
+  trimmedResults?: number;
+  verifier?: { checked: boolean; unverified: string[]; corrected: boolean };
   error?: string;
 }
 
@@ -35,6 +38,9 @@ export default function AgentPage() {
   const [message, setMessage] = useState("");
   const [runMode, setRunMode] = useState<Mode | "compare">("compare");
   const [preload, setPreload] = useState(true);
+  const [focused, setFocused] = useState(false);
+  const [trim, setTrim] = useState(true);
+  const [verify, setVerify] = useState(true);
   const [model, setModel] = useState("");
   const [models, setModels] = useState<{ id: string; label: string }[]>([]);
   const [modelsNote, setModelsNote] = useState("");
@@ -47,7 +53,7 @@ export default function AgentPage() {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text, apiKey, mode, sessionId, preload, model })
+      body: JSON.stringify({ message: text, apiKey, mode, sessionId, preload, focused, trim, verify, model })
     });
     const data = await res.json();
     if (data.error) return { mode, text: "", usage: emptyUsage(), toolCalls: [], toolDefinitions: { count: 0, chars: 0 }, preloaded: [], error: data.error };
@@ -168,10 +174,17 @@ export default function AgentPage() {
               </button>
             ))}
           </div>
-          <label className="flex items-center gap-2 mt-2 text-sm text-slate-600">
-            <input type="checkbox" checked={preload} onChange={e => setPreload(e.target.checked)} />
-            Preload likely tools (gateway)
-          </label>
+          {([
+            [preload, setPreload, "Preload likely tools + skill (gateway)"],
+            [focused, setFocused, "Focused tools: top 5 as real functions (weak models)"],
+            [trim, setTrim, "Trim old tool results in history"],
+            [verify, setVerify, "Verify answer values against tool results"]
+          ] as const).map(([value, set, label]) => (
+            <label key={label} className="flex items-center gap-2 mt-2 text-sm text-slate-600">
+              <input type="checkbox" checked={value} onChange={e => set(e.target.checked)} />
+              {label}
+            </label>
+          ))}
           {runMode === "compare" && <p className="text-xs text-slate-400 mt-1">A/B runs every question twice (uses about twice the quota).</p>}
         </div>
 
@@ -227,7 +240,14 @@ export default function AgentPage() {
                         <div className="font-bold text-slate-600">
                           {r.mode === "gateway" ? "Gateway" : "Direct MCP"}: {r.error ? `error: ${r.error}` : `${r.usage.inputTokens.toLocaleString()} in / ${r.usage.outputTokens.toLocaleString()} out, ${r.usage.modelCalls} model calls, ${r.toolDefinitions.count} tool definitions`}
                         </div>
-                        {r.preloaded.length > 0 && <div className="text-slate-500">preloaded: {r.preloaded.join(", ")}</div>}
+                        {r.preloaded.length > 0 && <div className="text-slate-500">tools given up front: {r.preloaded.join(", ")}</div>}
+                        {r.skill && <div className="text-slate-500">skill loaded: {r.skill}</div>}
+                        {!!r.trimmedResults && <div className="text-slate-500">old results trimmed: {r.trimmedResults}</div>}
+                        {r.verifier?.checked && (
+                          <div className={r.verifier.unverified.length ? "text-amber-700" : "text-emerald-700"}>
+                            verifier: {r.verifier.unverified.length ? `${r.verifier.unverified.length} unsupported values (${r.verifier.unverified.join(", ")}) → asked to correct` : "all values found in tool results"}
+                          </div>
+                        )}
                         {r.toolCalls.map((c, j) => (
                           <div key={j} className={`font-mono ${c.isError ? "text-red-600" : "text-slate-500"}`}>
                             {c.name} {c.args} → {c.resultChars.toLocaleString()} chars
