@@ -1,6 +1,7 @@
 import MiniSearch from "minisearch";
 import { DownstreamTool, CompactToolSignature } from "../types/tool.js";
 import { SchemaTranspiler } from "../synthesizer/ts-transpiler.js";
+import { singular } from "./catalog.js";
 
 interface IndexedToolDocument {
   id: string; // namespacedName
@@ -51,7 +52,12 @@ const SYNONYMS: Record<string, string[]> = {
   comment: ["comment", "comments"],
   merge: ["merge"],
   user: ["users"],
-  people: ["users"]
+  people: ["users"],
+  many: ["count"],
+  number: ["count"],
+  total: ["count"],
+  field: ["field", "column"],
+  column: ["column", "field"]
 };
 
 /**
@@ -105,6 +111,7 @@ export class ToolDiscoveryEngine {
       });
     }
     this.miniSearch.addAll(docs);
+    this.prefixCache.clear();
   }
 
   /**
@@ -122,9 +129,23 @@ export class ToolDiscoveryEngine {
       filter: filter ? r => { const t = this.toolRegistry.get(r.id); return !!t && filter(t); } : undefined
     });
     if (results.length === 0) return [];
-    const floor = results[0].score * minScore;
 
-    return results
+    // Re-rank: a tool whose own NAME words match the request beats one whose description
+    // merely repeats a common word ("table" in every table tool). Server-wide name prefixes
+    // ("ap_" on every tool) are ignored.
+    const queryWords = new Set(expanded.split(/\s+/).filter(Boolean).map(singular));
+    const ranked = results
+      .map(r => {
+        const tool = this.toolRegistry.get(r.id);
+        const words = tool ? this.nameWords(tool) : [];
+        const hits = words.filter(w => queryWords.has(w)).length;
+        const coverage = words.length ? hits / words.length : 0;
+        return { id: r.id, score: r.score * (1 + 0.6 * coverage) };
+      })
+      .sort((a, b) => b.score - a.score);
+    const floor = ranked[0].score * minScore;
+
+    return ranked
       .filter(r => r.score >= floor)
       .slice(0, maxResults)
       .map(match => this.toolRegistry.get(match.id))
@@ -138,6 +159,28 @@ export class ToolDiscoveryEngine {
           estimatedTokens: SchemaTranspiler.estimateTokens(signatureText)
         };
       });
+  }
+
+  /** Words of a tool name (singular), minus a prefix shared by most tools of its server. */
+  private nameWords(tool: DownstreamTool): string[] {
+    const words = tool.name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).map(singular);
+    const prefix = this.commonPrefix(tool.serverId);
+    return prefix && words[0] === prefix ? words.slice(1) : words;
+  }
+
+  private prefixCache = new Map<string, string | undefined>();
+
+  private commonPrefix(serverId: string): string | undefined {
+    if (this.prefixCache.has(serverId)) return this.prefixCache.get(serverId);
+    const firsts = [...this.toolRegistry.values()]
+      .filter(t => t.serverId === serverId)
+      .map(t => t.name.toLowerCase().split(/[^a-z0-9]+/)[0]);
+    const counts = new Map<string, number>();
+    for (const f of firsts) counts.set(f, (counts.get(f) ?? 0) + 1);
+    const [top] = [...counts].sort((a, b) => b[1] - a[1]);
+    const prefix = top && firsts.length >= 4 && top[1] / firsts.length >= 0.6 ? top[0] : undefined;
+    this.prefixCache.set(serverId, prefix);
+    return prefix;
   }
 
   public getTool(namespacedName: string): DownstreamTool | undefined {

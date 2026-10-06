@@ -7,6 +7,9 @@ import { TokenStats } from "../stats/token-stats.js";
 import { ToolDiscoveryEngine } from "../discovery/search-index.js";
 import { SchemaTranspiler } from "../synthesizer/ts-transpiler.js";
 import { validateArgs } from "./arg-validator.js";
+import { ProjectionFilter } from "../distiller/projection-filter.js";
+import { KeyFilter } from "../distiller/key-filter.js";
+import { NullPruner } from "../distiller/null-pruner.js";
 import { DownstreamTool, ToolAccess, ToolCallPayload, ToolResult } from "../types/tool.js";
 import { estimateTokens } from "../util/tokens.js";
 
@@ -150,25 +153,80 @@ export class ExecutionDispatcher {
    * the parsed JSON (or text) of the result so the script can compute over it.
    */
   public async callForCode(name: string, args: unknown): Promise<{ value: unknown; rawTokens: number }> {
+    const r = await this.callRaw(name, args, { confirm: false, inCodeMode: true, via: "run_code_step" });
+    return { value: r.value, rawTokens: r.rawTokens };
+  }
+
+  /**
+   * One tool call without distillation, for code mode and workflows: same name resolution,
+   * $ref, default args, policy, validation and cache as a normal call. The full reply is
+   * kept in the result store (handle) and the parsed value is returned. Throws on errors.
+   */
+  public async callRaw(
+    name: string,
+    args: unknown,
+    opts: { confirm: boolean; inCodeMode?: boolean; via: string }
+  ): Promise<{ value: unknown; text: string; rawTokens: number; handle: string; tool: string }> {
+    const started = Date.now();
     const tool = this.pool.resolveTool(name);
     if (!tool || !this.policy.isVisible(tool)) throw new Error(this.unknownToolMessage(name));
     const withDefaults = this.applyDefaultArgs(tool, resolveRefs(args, this.egress.store).value);
     const access = this.accessFor(tool, withDefaults);
-    const decision = this.policy.check({ ...tool, access }, false, true);
+    const decision = this.policy.check({ ...tool, access }, opts.confirm, opts.inCodeMode ?? false);
     if (!decision.allowed) throw new Error(decision.reason);
     const check = validateArgs(tool, withDefaults);
     if (check.errors.length) throw new Error(`Invalid arguments for ${tool.namespacedName}: ${check.errors.join("; ")}`);
 
-    const { raw } = await this.callDownstream(tool, check.args, access);
+    const { raw, cacheHit } = await this.callDownstream(tool, check.args, access);
     const text = raw.content.filter(c => c.type === "text").map(c => c.text ?? "").join("\n");
-    if (raw.isError) throw new Error(`${tool.namespacedName} failed: ${text}`);
+    if (raw.isError) throw new Error(`${tool.namespacedName} failed: ${text.slice(0, 500)}`);
     let value: unknown = text;
     try {
       value = JSON.parse(text);
     } catch {
       /* plain text result */
     }
-    return { value, rawTokens: estimateTokens(text) };
+    const rawTokens = estimateTokens(text);
+    const handle = this.egress.store.put({ toolName: tool.namespacedName, serverId: tool.serverId, rawText: text, json: typeof value === "string" ? undefined : value });
+    // These results are not sent to the model: they count as raw tokens kept out of context.
+    this.stats.recordCall({ via: opts.via, tool: tool.namespacedName, rawTokens, sentTokens: 0, cacheHit, ms: Date.now() - started });
+    return { value, text, rawTokens, handle, tool: tool.namespacedName };
+  }
+
+  /** Static read/write of a tool by name (unknown tools count as writes). */
+  public staticAccess(name: string): ToolAccess {
+    const tool = this.pool.resolveTool(name);
+    if (!tool) return "write";
+    const rules = this.pool.getServerConfig(tool.serverId)?.writeIf?.[tool.name];
+    return tool.access === "write" || rules ? "write" : "read";
+  }
+
+  /**
+   * The model-facing view of a raw value: projection (given fields, else the server's
+   * default for that tool), noise keys and nulls removed. No clipping, no rendering.
+   */
+  public viewOf(toolName: string, value: unknown, fields?: string[]): unknown {
+    const tool = this.pool.resolveTool(toolName);
+    if (!tool || typeof value !== "object" || value === null) return value;
+    const server = this.pool.getServerConfig(tool.serverId);
+    const projected = ProjectionFilter.project(value, fields?.length ? fields : server?.projections?.[tool.name]);
+    const cfg = this.egress.config;
+    const filtered = KeyFilter.apply(projected, [...cfg.dropKeys, ...(server?.dropKeys ?? [])], cfg.keepKeys, Number.MAX_SAFE_INTEGER);
+    return NullPruner.prune(filtered.value) ?? filtered.value;
+  }
+
+  /** Distill a gateway-built reply (e.g. a workflow summary) with the normal size limits. */
+  public distillReply(result: ToolResult, toolName: string): ToolResult {
+    return this.egress.process(result, {
+      toolName,
+      serverId: "gateway",
+      inlineTokenLimit: this.effectiveInlineLimit(),
+      warnOnInjection: this.options.warnOnInjection
+    }).result;
+  }
+
+  public needsConfirmation(): boolean {
+    return this.policy.confirmWritesEnabled();
   }
 
   /** Server-configured default arguments (page size, server-side field selection) the agent omitted. */

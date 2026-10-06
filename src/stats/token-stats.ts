@@ -90,7 +90,7 @@ export class TokenStats {
       if (!line.trim()) continue;
       try {
         const r = JSON.parse(line) as StatsRecord;
-        if (r.type === "call" && (["call", "pinned", "batch", "direct"].includes(r.via)) && !r.blocked) {
+        if (r.type === "call" && (["call", "pinned", "batch", "direct", "workflow"].includes(r.via)) && !r.blocked) {
           counts.set(r.tool, (counts.get(r.tool) ?? 0) + 1);
         }
       } catch {

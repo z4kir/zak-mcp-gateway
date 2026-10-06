@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { loadConfig } from "./config/loader.js";
 import { GatewayServer } from "./server/gateway-server.js";
 import { CallRecord, SessionRecord, StatsRecord } from "./stats/token-stats.js";
+import { suggestWorkflows } from "./stats/suggestions.js";
 
 const USAGE = `zak-mcp-gateway [--config <servers.json>] [--passthrough]
 zak-mcp-gateway report [--config <servers.json> | --log <stats.jsonl>] [--session <id>]
@@ -102,6 +103,15 @@ async function report(args: string[]): Promise<void> {
     for (const [tool, fields] of suggestions) {
       const [server, name] = tool.split("__");
       console.log(`  ${server}.projections.${name}: ${JSON.stringify(fields)}`);
+    }
+  }
+
+  const flows = suggestWorkflows(calls);
+  if (flows.length) {
+    console.log("\nSuggested workflows (the same call sequence seen 2+ times; fill in the arguments, review, then add to gateway.workflows):");
+    for (const f of flows) {
+      console.log(`  seen ${f.count}×: ${f.steps.map(s => (s.repeat > 1 ? `${s.tool} ×${s.repeat}` : s.tool)).join(" → ")}`);
+      console.log(`  ${JSON.stringify(f.skeleton)}`);
     }
   }
 }

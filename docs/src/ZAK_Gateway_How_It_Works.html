@@ -63,16 +63,16 @@
 </head>
 <body>
 
-<h1>ZAK MCP Gateway <span class="ver">v0.3</span></h1>
+<h1>ZAK MCP Gateway <span class="ver">v0.4</span></h1>
 <div class="sub">How it works, in plain words: every technique, a picture of it, an everyday comparison, and the measured results.</div>
 
 <div class="tiles">
-  <div class="tile"><div class="num">95.5%</div><div class="lbl">fewer input tokens over a whole 8-task agent run vs no gateway (best case)</div></div>
-  <div class="tile"><div class="num">85%</div><div class="lbl">smaller tool definitions on every model request (3,600 → 541)</div></div>
-  <div class="tile"><div class="num">96.6%</div><div class="lbl">less tool output reaching the model (221,600 → 7,441)</div></div>
-  <div class="tile"><div class="num">−35%</div><div class="lbl">fewer tokens than v0.2 on the same tasks (best case)</div></div>
+  <div class="tile"><div class="num">96.8%</div><div class="lbl">fewer input tokens over a whole 9-task agent run vs no gateway</div></div>
+  <div class="tile"><div class="num">−42%</div><div class="lbl">vs v0.3 when the agent no longer has to search (pinned signatures)</div></div>
+  <div class="tile"><div class="num">18 → 11</div><div class="lbl">model requests for the same work (each request re-sends everything)</div></div>
+  <div class="tile"><div class="num">−49% / −58%</div><div class="lbl">vs your company lean server alone (heavy / light task, v0.3, 24/24 DB checks)</div></div>
 </div>
-<p class="muted">Measured on 5 Oct 2026 against the real GitHub MCP server (26 tools), public repo modelcontextprotocol/servers, o200k tokenizer, same calls in all setups. Details and limits in section 7.</p>
+<p class="muted">GitHub numbers measured on 6 Oct 2026 against the real GitHub MCP server (26 tools), public repo modelcontextprotocol/servers, o200k tokenizer, same calls in all setups. Lean numbers from your company benchmark (6 Oct, v0.3). Details and limits in section 8.</p>
 
 <h2>1. The problem in one minute</h2>
 <p>An AI agent uses tools (GitHub, files, databases, ticket systems) through <b>MCP</b>. The model is billed per <b>token</b>, roughly a short piece of a word. MCP wastes tokens in three places:</p>
@@ -96,18 +96,18 @@
   <text x="64" y="200" fill="#c9ced6" font-size="10" text-anchor="middle">Gemini, your UI</text>
 
   <rect x="150" y="10" width="400" height="340" rx="12" fill="#fff" stroke="#1b1f24" stroke-width="1.5"/>
-  <text x="350" y="32" font-size="13" font-weight="700" text-anchor="middle">ZAK MCP Gateway v0.3</text>
+  <text x="350" y="32" font-size="13" font-weight="700" text-anchor="middle">ZAK MCP Gateway v0.4</text>
   <text x="350" y="47" font-size="9.5" fill="#7a838f" text-anchor="middle">agent sees: 3 meta-tools + tool index + rules/skills (~540 tokens for GitHub)</text>
 
   <rect x="165" y="58" width="370" height="118" rx="8" fill="#e3f4f1"/>
   <text x="177" y="75" font-size="10.5" font-weight="700" fill="#0f8a7e">BEFORE THE CALL</text>
   <g font-size="9" fill="#1b1f24" text-anchor="middle">
-    <rect x="177" y="83" width="110" height="26" rx="6" fill="#fff" stroke="#0f8a7e"/><text x="232" y="100">Tool index · hot tools</text>
-    <rect x="295" y="83" width="110" height="26" rx="6" fill="#fff" stroke="#0f8a7e"/><text x="350" y="100">Compact search</text>
+    <rect x="177" y="83" width="110" height="26" rx="6" fill="#fff" stroke="#0f8a7e"/><text x="232" y="100">Index · pinned tools</text>
+    <rect x="295" y="83" width="110" height="26" rx="6" fill="#fff" stroke="#0f8a7e"/><text x="350" y="100">Lean, re-ranked search</text>
     <rect x="413" y="83" width="110" height="26" rx="6" fill="#fff" stroke="#0f8a7e"/><text x="468" y="100">Short signatures</text>
     <rect x="177" y="114" width="110" height="26" rx="6" fill="#fff" stroke="#0f8a7e"/><text x="232" y="131">Name + arg repair</text>
     <rect x="295" y="114" width="110" height="26" rx="6" fill="#fff" stroke="#0f8a7e"/><text x="350" y="131">Default args</text>
-    <rect x="413" y="114" width="110" height="26" rx="6" fill="#fff" stroke="#0f8a7e"/><text x="468" y="131">Batch calls</text>
+    <rect x="413" y="114" width="110" height="26" rx="6" fill="#fff" stroke="#0f8a7e"/><text x="468" y="131">Batch + workflows</text>
     <rect x="177" y="145" width="110" height="26" rx="6" fill="#fff" stroke="#0f8a7e"/><text x="232" y="162">Safety policy</text>
     <rect x="295" y="145" width="110" height="26" rx="6" fill="#fff" stroke="#0f8a7e"/><text x="350" y="162">Safe cache</text>
     <rect x="413" y="145" width="110" height="26" rx="6" fill="#fff" stroke="#0f8a7e"/><text x="468" y="162">$ref + patch</text>
@@ -145,7 +145,51 @@
   <path d="M570,245 L540,245" stroke="#6b4bc4" stroke-width="1.8" fill="none" marker-end="url(#ah)"/>
 </svg>
 
-<h2>3. What is new in v0.3</h2>
+<h2 class="page-break">3. What is new in v0.4: seven improvements</h2>
+<p>Your company test (gateway v0.3 in front of the lean server) showed where the remaining tokens go: <b>searches before writes</b> (46% of result tokens) and the <b>fixed cost of every turn</b> (tool list + instructions, re-sent each time). v0.4 targets exactly those. Every item is generic and off by default, so v0.4 with default settings behaves like v0.3.</p>
+<table>
+  <tr><th style="width:4%">#</th><th style="width:21%">Improvement</th><th style="width:40%">What it does (simply)</th><th>Real-world analogy</th></tr>
+  <tr><td>1</td><td><b>Pinned signatures</b></td><td>The one-line signatures of tools you choose (e.g. the 10–12 most-used write tools) are always in the instructions, so the agent calls them without searching.</td><td>The phone numbers you call daily, on a sticky note by the phone.</td></tr>
+  <tr><td>2</td><td><b>Workflow tools</b></td><td>A multi-step job written once in the config; the agent runs it with one call (see below). <code>npm run report</code> suggests workflows from repeated call sequences.</td><td>"The usual, please": the restaurant knows every step of the order.</td></tr>
+  <tr><td>3</td><td><b>Cheaper fixed cost per turn</b></td><td>Slim meta-tools (short descriptions, no parameter notes); sentences of a server's own instructions that only list tools are not repeated (the catalog has them); the compact <code>groups</code> catalog.</td><td>A pocket card instead of a printed brochure, handed over every visit.</td></tr>
+  <tr><td>4</td><td><b>Leaner search replies</b></td><td>Top hit as one line, other hits as names only (was ~85–300 tokens per search; now ~70–120).</td><td>The librarian points at one shelf instead of reading out the catalog.</td></tr>
+  <tr><td>5</td><td><b>Smarter search ranking</b></td><td>A tool whose <i>name</i> matches the request beats tools whose descriptions merely repeat a common word ("table"); "how many" finds count tools. GitHub accuracy unchanged (32/32 top-3).</td><td>Looking up "column" finds the column tool, not every page that says "table".</td></tr>
+  <tr><td>6</td><td><b>History trimming</b> (agent host)</td><td>Old tool results in the conversation shrink to a short stub with their handle; the agent UI does this, and every agent host should.</td><td>Filing old paperwork instead of carrying it to every meeting.</td></tr>
+  <tr><td>7</td><td><b>Prompt caching</b> (agent host)</td><td>Keep the tool list fixed for the session so the model provider's cache bills it at ~10%. The gateway keeps it fixed; the agent UI's "focused tools" mode changes it per question, so it trades caching for precision.</td><td>A season ticket: pay once, enter cheaply after.</td></tr>
+</table>
+
+<h3>Workflow tools in plain words</h3>
+<div class="two">
+  <div class="card"><b>Without a workflow</b> (build a table with 4 columns and a rule):<br>
+    create table → <i>model turn</i> → add column → <i>turn</i> → add column → <i>turn</i> → … → add rule → <i>turn</i><br>
+    <span class="muted">~10 model turns; each re-sends the tool list and the whole conversation.</span></div>
+  <div class="card"><b>With a workflow</b> <code>wf__build_table</code>:<br>
+    one call with the inputs (table name, columns, rule) → the gateway runs every step in order, passes values between them (the new table's id goes into each column step), and returns one short summary.<br>
+    <span class="muted">1 model turn.</span></div>
+</div>
+<pre>"build_table": {
+  "description": "Create a table with columns and a rule. Not for editing existing tables.",
+  "input": { "properties": { "table": {"type":"string"}, "columns": {"type":"array"} },
+             "required": ["table", "columns"] },
+  "steps": [
+    { "id": "table", "tool": "lean__ap_create_table",
+      "arguments": { "name": "${input.table}" } },
+    { "tool": "lean__ap_create_column", "forEach": "${input.columns}",
+      "arguments": { "table": "${steps.table.id}", "field": "${item}" } },
+    { "tool": "lean__ap_create_rule",
+      "arguments": { "table": "${steps.table.id}", "when": "before_insert" } }
+  ]
+}</pre>
+<table>
+  <tr><th style="width:30%">Safety stays the same</th><th>How</th></tr>
+  <tr><td>Writes need permission</td><td>One preview of all steps; nothing runs until the agent repeats the call with <code>confirm: true</code> (after asking the user).</td></tr>
+  <tr><td>Every step is checked</td><td>Each step goes through the normal safety rules, argument checks and cache, exactly like a single call.</td></tr>
+  <tr><td>Failures are precise</td><td>It stops at the first failing step and says which steps ran and which did not; a missing value never runs a step with an empty argument.</td></tr>
+  <tr><td>Nothing is lost</td><td>Every step's full reply is kept behind a handle; the summary is trimmed like any normal reply.</td></tr>
+  <tr><td>No surprises</td><td>Workflows are written (or approved from a <code>report</code> suggestion) by a person, never created by the agent itself; the normal tools stay available for unusual requests.</td></tr>
+</table>
+
+<h2>4. What was new in v0.3</h2>
 <p>v0.2 already made each answer small. Your company test showed the next problem: <b>extra turns</b>. Searches and re-paging added model requests, and each one re-sends the whole conversation. v0.3 attacks turns, keeps big data out of the conversation, and makes weaker models more precise.</p>
 <div class="three">
   <div class="card"><h3>Fewer turns</h3>Call tools by name from the index; compact search; most-used tools listed up front; several calls in one batch; counts and groupings computed in the gateway.<br><span class="muted">Like a shopping list: one trip, not one trip per item.</span></div>
@@ -153,12 +197,12 @@
   <div class="card"><h3>Any agent, more precise</h3>Your rules and skills reach every client; the downstream server can ask the user or the model through the gateway; a sandboxed code mode; helpers for weak models.<br><span class="muted">Like giving every new hire the same team handbook.</span></div>
 </div>
 
-<h2 class="page-break">4. One request, step by step</h2>
+<h2 class="page-break">5. One request, step by step</h2>
 <p>Real example from the benchmark: <i>"show the last 10 commits of modelcontextprotocol/servers"</i>, then <i>"how many open issues are pull requests?"</i></p>
 <div class="flow">
-  <div class="step before"><div class="no">1</div><div><b>The agent reads the session instructions:</b> a tool index (<code>github: list_commits, list_issues, …</code>), the most-used tools with one-line signatures, your rules and skill list. It calls <code>github__list_commits</code> directly, without searching.</div><div class="cost">in every request: ~540 tokens instead of 3,600</div></div>
+  <div class="step before"><div class="no">1</div><div><b>The agent reads the session instructions:</b> a tool index (<code>github: list_commits, list_issues, …</code>), pinned one-line signatures of the tools it will need, your rules and skill list. It calls <code>github__list_commits</code> directly, without searching.</div><div class="cost">in every request: ~550–650 tokens instead of 3,600</div></div>
   <div class="arrow">↓</div>
-  <div class="step before"><div class="no">2</div><div><b>Only if unsure, it searches.</b> The top hit comes back as a full signature, the others as one-line summaries.</div><div class="cost">~85–160 tokens instead of ~250–300</div></div>
+  <div class="step before"><div class="no">2</div><div><b>Only if unsure, it searches.</b> The top hit comes back as one line, the others as names.</div><div class="cost">~70–120 tokens (v0.2: ~250–300)</div></div>
   <div class="arrow">↓</div>
   <div class="step before"><div class="no">3</div><div><b>The gateway checks the call:</b> fixes small mistakes (<code>per_page</code> → <code>perPage</code>), adds configured default arguments, applies the safety rules and the cache.</div><div class="cost">0 extra turns</div></div>
   <div class="arrow">↓</div>
@@ -175,7 +219,7 @@ a207787…  chore: sync the bug report form with v2/main…  cliffhall          
 … 8 more rows
 [r1: default fields, noise keys removed; full data via mcp_get_result]</pre>
 
-<h2 class="page-break">5. Every technique, with an everyday comparison</h2>
+<h2 class="page-break">6. Every technique, with an everyday comparison</h2>
 <table>
   <tr><th style="width:19%">Technique</th><th style="width:9%">Where</th><th style="width:40%">What it does (simply)</th><th>Real-world analogy</th></tr>
   <tr><td><b>Meta-tools</b></td><td><span class="chip before">before</span></td><td>The agent sees 3 tools (search, call, get_result) instead of every server's tools.</td><td>One concierge desk instead of 40 counters.</td></tr>
@@ -202,9 +246,15 @@ a207787…  chore: sync the bug report form with v2/main…  cliffhall          
   <tr><td><b>Sandboxed code mode</b> <span class="chip new">upgraded</span></td><td><span class="chip around">around</span></td><td>A short script calls several read tools; only the answer returns. Runs in a separate process with no file access, no child processes, a memory cap and a hard timeout. Off by default.</td><td>A locked workroom with one phone line.</td></tr>
   <tr><td><b>Savings log, report, budget</b></td><td><span class="chip around">around</span></td><td>Every call logged; <code>npm run report</code> shows savings, turns by kind and suggested default fields; optional session budget.</td><td>An electricity meter with a prepaid limit.</td></tr>
   <tr><td><b>Plain-MCP baseline</b></td><td><span class="chip around">around</span></td><td><code>--passthrough</code> runs the same servers as plain MCP for fair A/B tests.</td><td>Weighing yourself on the same scale.</td></tr>
+  <tr><td><b>Pinned signatures</b> <span class="chip new">v0.4</span></td><td><span class="chip before">before</span></td><td>Chosen tools are always listed with one-line signatures, so writes need no search.</td><td>Daily numbers on a sticky note.</td></tr>
+  <tr><td><b>Workflow tools</b> <span class="chip new">v0.4</span></td><td><span class="chip around">around</span></td><td>A configured multi-step job in one call (<code>wf__name</code>), one confirmation, precise failure report, trimmed output.</td><td>"The usual, please."</td></tr>
+  <tr><td><b>Workflow suggestions</b> <span class="chip new">v0.4</span></td><td><span class="chip around">around</span></td><td><code>npm run report</code> spots call sequences that repeat and prints a workflow skeleton for a person to review.</td><td>A waiter noticing you always order the same thing.</td></tr>
+  <tr><td><b>Slim meta-tools, lean search</b> <span class="chip new">v0.4</span></td><td><span class="chip before">before</span></td><td>Shorter tool descriptions every turn; one-line search hits; repeated tool inventories dropped.</td><td>A pocket card instead of a brochure.</td></tr>
+  <tr><td><b>Name-aware search ranking</b> <span class="chip new">v0.4</span></td><td><span class="chip before">before</span></td><td>Matches on a tool's name count more than words repeated in many descriptions.</td><td>Finding the shop by its sign, not by the street name.</td></tr>
+  <tr><td><b>Multi-table replies</b> <span class="chip new">v0.4</span></td><td><span class="chip after">after</span></td><td>A reply with several lists becomes several small tables instead of JSON.</td><td>One spreadsheet tab per list.</td></tr>
 </table>
 
-<h2 class="page-break">6. Helping weaker models (agent UI)</h2>
+<h2 class="page-break">7. Helping weaker models (agent UI)</h2>
 <p>Small models (Gemini Flash, Claude Haiku) lose precision when they must pick among many tools, follow long rules, plan many steps and read big results. The rule is: <b>move decisions out of the model and into code.</b> The test agent UI now has four switches that do this:</p>
 <table>
   <tr><th style="width:22%">Switch</th><th>What it does</th><th style="width:30%">Analogy</th></tr>
@@ -213,58 +263,76 @@ a207787…  chore: sync the bug report form with v2/main…  cliffhall          
   <tr><td><b>Trim old results</b></td><td>Tool results from earlier turns are shortened in the history (with their handle), so they stop being re-sent in full every turn.</td><td>Filing old paperwork instead of carrying it around.</td></tr>
   <tr><td><b>Verify the answer</b></td><td>IDs, SHAs and long numbers in the answer must appear in the tool results; otherwise the model gets one chance to correct itself.</td><td>A supervisor checking the figures before the report ships.</td></tr>
 </table>
+<p><b>Mind the trade-off with prompt caching (#7):</b> "focused tools" changes the tool list on every question, so the model provider cannot reuse its cached copy of the tool list. For strong models keep it off and rely on pinned signatures; for weak models the precision gain usually matters more.</p>
 <p><b>Live result</b> (Gemini, focused + trim + verify on): "last 3 commits" used 2 model calls and called the right tool with the right arguments on the first try. A harder counting question took 47k input tokens in 10 calls, against about 110k in 12 calls for a similar question on the old gateway. The run also exposed one real gap (a <code>path</code> meant per row), which is fixed and now has a test.</p>
 
-<h2>7. Measured results: no gateway vs v0.2 vs v0.3</h2>
-<p>Live, real GitHub MCP server (26 tools), public repo, 8 read-only tasks, same calls in all three setups, o200k tokenizer. Command: <code>npm run bench:compare -- &lt;v0.2 dist&gt;</code>.</p>
+<h2>8. Measured results</h2>
+<h3>GitHub MCP: no gateway vs v0.3 vs v0.4</h3>
+<p>Live, real GitHub MCP server (26 tools), public repo, 9 read-only tasks (the 8 from v0.3 plus a "repo overview"), same calls in every setup, o200k tokenizer. Command: <code>npm run bench:compare -- &lt;older dist&gt;</code>. v0.4 "tuned" = pinned signatures, groups catalog, slim meta-tools, one-line search, and a workflow for the overview.</p>
 
-<div class="legend"><span><i style="background:var(--s1)"></i>No gateway</span><span><i style="background:var(--s2)"></i>v0.2</span><span><i style="background:var(--s3)"></i>v0.3 (solid = best case, outline = worst case)</span><span class="muted">each panel has its own scale</span></div>
-<svg viewBox="0 0 700 300" width="100%" role="img" aria-label="Tokens for no gateway, v0.2 and v0.3 in three panels">
+<div class="legend"><span><i style="background:var(--s1)"></i>No gateway</span><span><i style="background:var(--s2)"></i>v0.3</span><span><i style="background:var(--s3)"></i>v0.4 tuned</span><span class="muted">solid = agent calls tools by name · outline = agent searches before each new tool · each panel has its own scale</span></div>
+<svg viewBox="0 0 700 330" width="100%" role="img" aria-label="Agent-run input tokens and model requests for no gateway, v0.3 and v0.4">
   <g font-size="10.5" fill="#1b1f24">
-    <text x="0" y="14" font-weight="700">Tool definitions per model request</text>
-    <rect x="0" y="22" width="420" height="16" rx="4" fill="#2a78d6"/><text x="426" y="34" fill="#4a5360">3,600</text>
-    <rect x="0" y="40" width="51.2" height="16" rx="4" fill="#eb6834"/><text x="57" y="52" fill="#4a5360">439</text>
-    <rect x="0" y="58" width="63.1" height="16" rx="4" fill="#1baf7a"/><text x="69" y="70" fill="#4a5360">541 (−85% vs none; +102 vs v0.2 for the new options)</text>
+    <text x="0" y="14" font-weight="700">Whole agent run: input tokens (all three)</text>
+    <rect x="0" y="22" width="420" height="16" rx="4" fill="#2a78d6"/><text x="426" y="34" fill="#4a5360">1,822,172</text>
+    <rect x="0" y="40" width="23.3" height="16" rx="4" fill="none" stroke="#eb6834" stroke-width="1.5"/>
+    <rect x="0" y="40" width="17.4" height="16" rx="4" fill="#eb6834"/><text x="30" y="52" fill="#4a5360">75,586 – 101,171</text>
+    <rect x="0" y="58" width="18.6" height="16" rx="4" fill="none" stroke="#1baf7a" stroke-width="1.5"/>
+    <rect x="0" y="58" width="13.5" height="16" rx="4" fill="#1baf7a"/><text x="30" y="70" fill="#4a5360">58,715 – 80,603 (−96.8% vs none)</text>
 
-    <text x="0" y="104" font-weight="700">Tool output reaching the model (incl. searches and paging)</text>
-    <rect x="0" y="112" width="420" height="16" rx="4" fill="#2a78d6"/><text x="426" y="124" fill="#4a5360">221,600</text>
-    <rect x="0" y="130" width="17.1" height="16" rx="4" fill="#eb6834"/><text x="23" y="142" fill="#4a5360">9,012</text>
-    <rect x="0" y="148" width="15.5" height="16" rx="4" fill="none" stroke="#1baf7a" stroke-width="1.5"/>
-    <rect x="0" y="148" width="14.1" height="16" rx="4" fill="#1baf7a"/><text x="22" y="160" fill="#4a5360">7,441 – 8,182</text>
+    <text x="0" y="108" font-weight="700">Same, gateways only (zoomed)</text>
+    <rect x="0" y="116" width="420" height="16" rx="4" fill="none" stroke="#eb6834" stroke-width="1.5"/>
+    <rect x="0" y="116" width="313.8" height="16" rx="4" fill="#eb6834"/><text x="426" y="128" fill="#4a5360">v0.3: 75,586 – 101,171</text>
+    <rect x="0" y="134" width="334.6" height="16" rx="4" fill="none" stroke="#1baf7a" stroke-width="1.5"/>
+    <rect x="0" y="134" width="243.8" height="16" rx="4" fill="#1baf7a"/><text x="426" y="146" fill="#4a5360">v0.4: 58,715 – 80,603</text>
+    <text x="0" y="168" font-size="9.5" fill="#4a5360">Realistic pair: v0.3 has to search (101,171) · v0.4 has the signatures pinned, no search (58,715) → −42%</text>
 
-    <text x="0" y="194" font-weight="700">Whole 8-task agent run: input tokens (every request re-sends definitions + history)</text>
-    <rect x="0" y="202" width="420" height="16" rx="4" fill="#2a78d6"/><text x="426" y="214" fill="#4a5360">1,085,806 · 9 requests</text>
-    <rect x="0" y="220" width="28.6" height="16" rx="4" fill="#eb6834"/><text x="34" y="232" fill="#4a5360">74,019 · 15 requests (−93.2%)</text>
-    <rect x="0" y="238" width="27.8" height="16" rx="4" fill="none" stroke="#1baf7a" stroke-width="1.5"/>
-    <rect x="0" y="238" width="18.7" height="16" rx="4" fill="#1baf7a"/><text x="34" y="250" fill="#4a5360">48,465 – 71,827 · 10–15 requests (−95.5% to −93.4%)</text>
+    <text x="0" y="204" font-weight="700">Model requests (each one re-sends tool list + conversation)</text>
+    <rect x="0" y="212" width="280" height="16" rx="4" fill="#2a78d6"/><text x="286" y="224" fill="#4a5360">12</text>
+    <rect x="0" y="230" width="420" height="16" rx="4" fill="none" stroke="#eb6834" stroke-width="1.5"/>
+    <rect x="0" y="230" width="303.3" height="16" rx="4" fill="#eb6834"/><text x="426" y="242" fill="#4a5360">v0.3: 13 – 18</text>
+    <rect x="0" y="248" width="373.3" height="16" rx="4" fill="none" stroke="#1baf7a" stroke-width="1.5"/>
+    <rect x="0" y="248" width="256.7" height="16" rx="4" fill="#1baf7a"/><text x="426" y="260" fill="#4a5360">v0.4: 11 – 16</text>
   </g>
-  <text x="0" y="282" font-size="9" fill="#7a838f">v0.3 best case: the agent calls tools by name, as its instructions say. Worst case: it still searches before every new tool (with compact results).</text>
+  <text x="0" y="292" font-size="9" fill="#7a838f">"No gateway" makes fewer requests (no searching) but each carries all 26 raw schemas and raw results, hence 20–30× more tokens.</text>
+  <text x="0" y="306" font-size="9" fill="#7a838f">v0.4 with default settings measured exactly like v0.3 (75,586 – 101,171): all v0.4 options are off by default.</text>
 </svg>
 
 <table>
-  <tr><th>Task</th><th class="n">No gateway</th><th class="n">v0.2</th><th class="n">v0.3</th><th>What made the difference</th></tr>
-  <tr><td>list_commits (10)</td><td class="n">18,337</td><td class="n">876 + 84</td><td class="n">876 + 84</td><td>default fields → table</td></tr>
-  <tr><td>list_commits (30), sha + message</td><td class="n">61,589</td><td class="n">1,280</td><td class="n">1,280</td><td>projection → table</td></tr>
-  <tr><td>list_issues (20 open)</td><td class="n">37,846</td><td class="n">909 + 296</td><td class="n">909 + 157</td><td>compact search</td></tr>
-  <tr><td>list_pull_requests (10)</td><td class="n">27,375</td><td class="n">839 + 258</td><td class="n">839 + 223</td><td>compact search</td></tr>
-  <tr><td>search_repositories (10)</td><td class="n">3,470</td><td class="n">485 + 287</td><td class="n">485 + 144</td><td>compact search</td></tr>
-  <tr><td>README</td><td class="n">2,498</td><td class="n">1,212 + 224</td><td class="n">1,212 + 133</td><td>compact search</td></tr>
-  <tr><td>list_commits again</td><td class="n">18,337</td><td class="n">876</td><td class="n">876</td><td>cache (no GitHub call)</td></tr>
-  <tr><td>"How many of 30 open issues are PRs?"</td><td class="n">52,148</td><td class="n">909 + 477</td><td class="n">909 + 55</td><td><code>count</code> instead of paging</td></tr>
+  <tr><th>Task</th><th class="n">No gateway</th><th class="n">v0.3</th><th class="n">v0.4 tuned</th><th>What made the difference in v0.4</th></tr>
+  <tr><td>list_commits (10)</td><td class="n">18,337</td><td class="n">876 + 84</td><td class="n">876 + 67</td><td>one-line search reply</td></tr>
+  <tr><td>list_commits (30), sha + message</td><td class="n">61,589</td><td class="n">1,280</td><td class="n">1,280</td><td>same</td></tr>
+  <tr><td>list_issues (20 open)</td><td class="n">37,846</td><td class="n">909 + 157</td><td class="n">909 + 118</td><td>leaner search</td></tr>
+  <tr><td>list_pull_requests (10)</td><td class="n">27,375</td><td class="n">839 + 223</td><td class="n">839 + 120</td><td>leaner search</td></tr>
+  <tr><td>search_repositories (10)</td><td class="n">3,470</td><td class="n">485 + 144</td><td class="n">485 + 71</td><td>leaner search</td></tr>
+  <tr><td>README</td><td class="n">2,498</td><td class="n">1,212 + 133</td><td class="n">1,212 + 70</td><td>leaner search</td></tr>
+  <tr><td>list_commits again</td><td class="n">18,337</td><td class="n">876</td><td class="n">876</td><td>cache</td></tr>
+  <tr><td>"How many of 30 open issues are PRs?"</td><td class="n">52,148</td><td class="n">909 + 55</td><td class="n">909 + 55</td><td>count on the handle</td></tr>
+  <tr><td>Repo overview (commits, issues, PRs)</td><td class="n">32,232 · 3 turns</td><td class="n">753 · 3 turns</td><td class="n">808 · 1 turn</td><td>workflow: one call instead of three</td></tr>
 </table>
-<p class="muted">"+ n" = tokens spent on searching or follow-up reads. Agent-run totals add every model request: tool definitions + all earlier history + 40 tokens per tool call written by the model.</p>
+<p class="muted">"+ n" = tokens spent on searching or follow-up reads (searches only happen when the agent searches). With pinned signatures, tuned v0.4 needs none, which is the 58,715 figure.</p>
+
+<h3>Your company lean server (measured by you, gateway v0.3)</h3>
+<table>
+  <tr><th>Task</th><th class="n">Lean alone</th><th class="n">Lean + its batch tool</th><th class="n">Gateway v0.3 → lean</th><th>Checks</th></tr>
+  <tr><td>Light: read and inspect (6 calls)</td><td class="n">98,493</td><td class="n">–</td><td class="n">41,054 (groups: 39,486)</td><td>same rows, full JSX in one call</td></tr>
+  <tr><td>Heavy: build and verify</td><td class="n">261,990</td><td class="n">201,090</td><td class="n">102,628</td><td>7/7 + 14 records each run</td></tr>
+  <tr><td>Heavy, searches removed (derived)</td><td class="n">–</td><td class="n">–</td><td class="n">45,346</td><td>what pinned signatures (v0.4 #1) target</td></tr>
+</table>
+<p class="muted">v0.4 has not been re-measured on the lean server yet. Expected from the derived figure and this GitHub run: heavy ~45–55k with pinned write signatures, lower with a build workflow.</p>
 
 <h3>Read these numbers honestly</h3>
 <ul>
-  <li><b>The best case needs the model to cooperate.</b> v0.3 tells the agent to call tools by name; if it keeps searching anyway, v0.3 is only ~3% better than v0.2 on this task set.</li>
-  <li><b>v0.3's definitions are ~100 tokens bigger</b> than v0.2's (batch, <code>$ref</code>, counting options). The saving comes from fewer and smaller turns.</li>
-  <li><b>Read-only benchmark.</b> Write receipts, batch writes, <code>$ref</code>/patch, history trimming and skills don't show on a public read-only repo; 55 automated tests cover them.</li>
-  <li><b>Small setups can cost more.</b> With a handful of small tools the gateway's definitions exceed direct MCP's. The gateway pays off with many tools (your 227-tool server: ~77k → ~1.5k tokens per request) or big results.</li>
-  <li><b>Inside Claude Code</b>, MCP is a small share of each request (about 2.6% in your measurements), so the whole-session saving there is small. The gains are largest for MCP-heavy agents such as your user UI.</li>
-  <li><b>Tokens are not task success.</b> The o200k tokenizer stands in for Claude/Gemini; use the agent UI's A/B mode for real-model numbers (one GitHub question: 20,806 → 2,522 input tokens, −87.9%).</li>
+  <li><b>Pinned signatures cost tokens on every turn</b> (+100 here). They pay off only by removing searches; pin the 10–12 tools used most, not everything.</li>
+  <li><b>Best case needs the model to cooperate</b> (call by name). With pinned signatures that is the natural behaviour, but only a live-model run proves it.</li>
+  <li><b>Workflows help multi-step jobs.</b> On the read-only GitHub test only the overview task could use one; build tasks (like your heavy task) gain much more.</li>
+  <li><b>Read-only benchmark.</b> Write receipts, batch writes, <code>$ref</code>/patch, trimming and skills are covered by 65 automated tests, not by this run.</li>
+  <li><b>Small setups can cost more</b> than plain MCP; the gateway pays off with many tools or big results.</li>
+  <li><b>Inside Claude Code</b> MCP is ~2.6% of all input, so whole-session savings there are small; MCP-heavy agents (your planned user agent) gain the most.</li>
+  <li><b>Tokens are not task success.</b> The o200k tokenizer stands in for Claude/Gemini. Real-model check so far: one Gemini A/B (20,806 → 2,522 input tokens).</li>
 </ul>
 
-<h2 class="page-break">8. Bugs found and fixed</h2>
+<h2 class="page-break">9. Bugs found and fixed</h2>
 <table>
   <tr><th style="width:32%">Problem</th><th>Effect</th><th>Fix</th></tr>
   <tr><td colspan="3"><b>v0.2</b></td></tr>
@@ -280,9 +348,13 @@ a207787…  chore: sync the bug report form with v2/main…  cliffhall          
   <tr><td>Grouped catalog format hid where the verb goes</td><td>Models would guess wrong names</td><td><code>{create,get,list}_issue</code> notation + plural-tolerant lookup</td></tr>
   <tr><td>Gemini sent <code>path</code> meaning "this field of each row"</td><td>Errors, 3 wasted turns in a live run</td><td>Falls back to a per-row field; test added</td></tr>
   <tr><td>Answer verifier matched "1234" inside "INC0012345"</td><td>Wrong values could pass the check</td><td>Whole-token matching; test added</td></tr>
+  <tr><td colspan="3"><b>v0.4 (found by tests and the GitHub run)</b></td></tr>
+  <tr><td>Workflow output carried raw step data</td><td>The overview workflow returned 28,384 tokens</td><td>Output uses trimmed views of each step; 808 tokens</td></tr>
+  <tr><td>Search ranked a description match above a name match</td><td>"add a field to a table" found the column tool 3rd</td><td>Name-aware re-ranking; 1st now; GitHub accuracy unchanged</td></tr>
+  <tr><td>A reply with several lists stayed JSON</td><td>Bigger multi-list replies</td><td>One small table per list</td></tr>
 </table>
 
-<h2>9. Plan coverage</h2>
+<h2>10. Plan coverage</h2>
 <table>
   <tr><th style="width:30%">Plan</th><th style="width:12%">Status</th><th>Notes</th></tr>
   <tr><td>Build plan phases 1–4 (core, results, stats, safety)</td><td><span class="chip done">done</span></td><td>Since v0.2.</td></tr>
@@ -290,14 +362,23 @@ a207787…  chore: sync the bug report form with v2/main…  cliffhall          
   <tr><td>Build plan phase 6 (advanced)</td><td><span class="chip part">mostly</span></td><td>Sandboxed code mode, safe cache, tool preload, suggested default fields done; a cheap-model router belongs in the host app.</td></tr>
   <tr><td>Economy plan: 14 ideas</td><td><span class="chip done">all done</span></td><td>Call-first + hot signatures, compact search, batch, per-server limits, field by path, receipts, synonyms, safe cache, safer code mode, dedupe + stats, catalog modes, <code>$ref</code>, patch, suggested fields.</td></tr>
   <tr><td>Extra ideas</td><td><span class="chip done">done</span></td><td>Forwarded server instructions, default-argument pushdown, aggregation on handles, ask-user/ask-model pass-through, history trimming, live-model benchmarking.</td></tr>
-  <tr><td>Weak-model precision plan</td><td><span class="chip part">started</span></td><td>Rules + skills serving, focused tools, verifier, skill preload done. Still open: evaluation set, workflow tools, name → ID resolution, escalation.</td></tr>
+  <tr><td>Weak-model precision plan</td><td><span class="chip part">in progress</span></td><td>Rules + skills serving, focused tools, verifier, skill preload, workflow tools done. Still open: evaluation set, name → ID resolution, escalation.</td></tr>
+  <tr><td>Next-steps plan (7 improvements)</td><td><span class="chip done">done in v0.4</span></td><td>Pinned signatures, workflow tools + suggestions, cheaper turns, leaner search, search fix (generic); history trimming and prompt caching documented for agent hosts.</td></tr>
 </table>
 
-<h2>10. Try it yourself</h2>
-<pre>npm install &amp;&amp; npm test                      # 55 tests: unit, MCP round trips, v0.3 features, agent-UI helpers
+<h2>11. Versions and trying it yourself</h2>
+<table>
+  <tr><th style="width:12%">Version</th><th style="width:16%">Date</th><th>Theme</th><th style="width:28%">Release note</th></tr>
+  <tr><td>v0.1</td><td>2–3 Oct 2026</td><td>First scaffold: two meta-tools, search, signatures, cache</td><td><code>docs/versions/ZAK_Gateway_v0.1.pdf</code></td></tr>
+  <tr><td>v0.2</td><td>4 Oct 2026</td><td>Build-plan upgrade: handles, trimming, safety, stats, A/B harness</td><td><code>docs/versions/ZAK_Gateway_v0.2.pdf</code></td></tr>
+  <tr><td>v0.3</td><td>5 Oct 2026</td><td>Economy upgrade: fewer turns, data stays in the gateway, any-client precision</td><td><code>docs/versions/ZAK_Gateway_v0.3.pdf</code></td></tr>
+  <tr><td><b>v0.4</b></td><td>6 Oct 2026</td><td>Seven improvements: pinned signatures, workflows, cheaper turns, leaner search</td><td><code>docs/versions/ZAK_Gateway_v0.4.pdf</code></td></tr>
+</table>
+<pre>npm install &amp;&amp; npm test                      # 65 tests: unit, MCP round trips, v0.3/v0.4 features, agent-UI helpers
 npm run test:github                            # live: CLI over stdio → GitHub MCP (no token needed for public repos)
-npm run bench:compare -- &lt;v0.2 dist dir&gt;       # live 3-way benchmark: no gateway vs v0.2 vs v0.3
-npm run report                                 # savings, turns by kind, suggested default fields
+npm run bench:compare -- &lt;older dist dir&gt;      # live benchmark: no gateway vs an older build vs this build (+ tuned)
+npm run report                                 # savings, turns by kind, suggested default fields and workflows
+node docs/src/versions/build-versions.mjs      # rebuild the per-version release notes
 cd agent-ui &amp;&amp; npm run dev                      # Gemini agent: A/B mode + weak-model switches</pre>
 
 </body>

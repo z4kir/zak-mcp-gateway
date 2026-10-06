@@ -6,11 +6,11 @@
 
 One MCP server for your agent, every MCP server behind it, at a fraction of the tokens.
 
-![version](https://img.shields.io/badge/version-0.3.0-0f8a7e)
+![version](https://img.shields.io/badge/version-0.4.0-0f8a7e)
 ![node](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)
 ![typescript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)
 ![mcp sdk](https://img.shields.io/badge/MCP%20SDK-1.32-6b4bc4)
-![tests](https://img.shields.io/badge/tests-55%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-65%20passing-2ea44f)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
 [Why](#-why) · [Results](#-measured-results) · [How it works](#-how-it-works) · [Quick start](#-quick-start) · [Configuration](#%EF%B8%8F-configuration) · [Testing](#-testing--benchmarks) · [Docs](#-documentation)
@@ -34,37 +34,46 @@ The ZAK gateway sits between the agent and your MCP servers and cuts tokens in *
 
 ## 📊 Measured results
 
-Live run against the real GitHub MCP server (public repo `modelcontextprotocol/servers`, 26 tools, o200k tokenizer), same calls in all three setups. Reproduce with `npm run bench:compare -- <v0.2 dist dir>`.
+**GitHub MCP server** (public repo `modelcontextprotocol/servers`, 26 tools, o200k tokenizer, 9 read-only tasks, same calls in every setup). Reproduce with `npm run bench:compare -- <older dist dir>`.
 
-| Metric | No gateway | v0.2 | **v0.3** |
+| Metric | No gateway | v0.3 | **v0.4 tuned** |
 |---|---:|---:|---:|
-| Tool definitions per model request | 3,600 | 439 | 541 |
-| 8 tool results (+ searches, pages) | 221,600 | 9,012 | **7,441 – 8,182** |
-| Whole 8-task agent loop, input tokens | 1,085,806 | 74,019 | **48,465 – 71,827** |
-| Model requests in that loop | 9 | 15 | **10 – 15** |
-| Saved vs no gateway | – | 93.2% | **93.4% – 95.5%** |
+| Tool definitions per model request | 3,600 | 541 | 641 |
+| Whole agent run, input tokens | 1,822,172 | 75,586 – 101,171 | **58,715** – 80,603 |
+| Model requests | 12 | 13 – 18 | **11** – 16 |
+| Saved vs no gateway | – | 95.9% | **96.8%** |
 
-v0.3 is a range: **best case** the agent calls tools by name from the catalog (what v0.3's instructions tell it to do), **worst case** it still searches before every new tool (with v0.3's compact search results).
+Ranges: low = the agent calls tools by name, high = it searches before every new tool. The realistic comparison is **v0.3 searching (101,171) vs v0.4 with pinned signatures, no search needed (58,715): −42%**. "Tuned" = pinned signatures, `groups` catalog, slim meta-tools, one-line search, and one workflow; with default settings v0.4 measures exactly like v0.3.
+
+**Your company lean server** (measured by you on gateway v0.3, every write checked in the database):
+
+| Task | Lean alone | Lean + its batch tool | Gateway v0.3 → lean |
+|---|---:|---:|---:|
+| Light: read and inspect | 98,493 | – | **41,054** (−58%) |
+| Heavy: build and verify | 261,990 | 201,090 | **102,628** (−49%) |
+| Heavy, searches removed (derived) | – | – | **45,346**, which is what v0.4's pinned signatures target |
 
 <details>
 <summary><b>Per-task breakdown and honest limits</b></summary>
 
-| Task | No gateway | v0.2 | v0.3 | What changed in v0.3 |
+| Task | No gateway | v0.3 | v0.4 tuned | What made the difference in v0.4 |
 |---|---:|---:|---:|---|
-| `list_commits` (10) | 18,337 | 876 + 84 search | 876 + 84 search | same |
+| `list_commits` (10) | 18,337 | 876 + 84 search | 876 + 67 search | one-line search reply |
 | `list_commits` (30), sha + message | 61,589 | 1,280 | 1,280 | same |
-| `list_issues` (20 open) | 37,846 | 909 + 296 search | 909 + 157 search | compact search |
-| `list_pull_requests` (10) | 27,375 | 839 + 258 search | 839 + 223 search | compact search |
-| `search_repositories` (10) | 3,470 | 485 + 287 search | 485 + 144 search | compact search |
-| README | 2,498 | 1,212 + 224 search | 1,212 + 133 search | compact search |
+| `list_issues` (20 open) | 37,846 | 909 + 157 search | 909 + 118 search | leaner search |
+| `list_pull_requests` (10) | 27,375 | 839 + 223 search | 839 + 120 search | leaner search |
+| `search_repositories` (10) | 3,470 | 485 + 144 search | 485 + 71 search | leaner search |
+| README | 2,498 | 1,212 + 133 search | 1,212 + 70 search | leaner search |
 | `list_commits` again | 18,337 | 876 (cache) | 876 (cache) | same |
-| "How many of 30 open issues are PRs?" | 52,148 | 909 + 477 paging | 909 + **55** `count` | aggregation on handles |
+| "How many of 30 open issues are PRs?" | 52,148 | 909 + 55 `count` | 909 + 55 `count` | same |
+| Repo overview (commits, issues, PRs) | 32,232 · 3 turns | 753 · 3 turns | 808 · **1 turn** | workflow tool |
 
-- v0.3's tool definitions are ~100 tokens bigger than v0.2's (batch, `$ref`, aggregation parameters). The loop saving comes from fewer and smaller turns, not smaller definitions.
-- This benchmark is read-only on a public repo, so write receipts, batch writes, `$ref`/patch, history trimming and skills don't show here; they are covered by tests.
-- With only a handful of small tools the gateway costs more than direct MCP. It pays off with many tools or big results.
-- The o200k tokenizer stands in for Claude/Gemini tokenizers. For real model numbers use the agent UI's A/B mode (measured: 20,806 → 2,522 input tokens, −87.9%, Gemini, one GitHub question).
-- Token counts do not measure task success. Default field projections hide fields, which stay reachable through result handles.
+- Pinned signatures cost ~100 tokens per turn; they pay off only by removing searches. Pin the 10–12 tools used most.
+- Workflows help multi-step jobs most; this read-only test has only one (the overview). Build tasks like your heavy task gain more.
+- Read-only benchmark: write receipts, batch writes, `$ref`/patch, trimming and skills are covered by tests (65), not by this run.
+- With only a handful of small tools the gateway costs more than direct MCP; it pays off with many tools or big results.
+- Inside Claude Code, MCP is ~2.6% of all input, so whole-session savings there are small. MCP-heavy agents gain the most.
+- The o200k tokenizer stands in for Claude/Gemini. Real-model check so far: one Gemini A/B (20,806 → 2,522 input tokens, −87.9%).
 
 </details>
 
@@ -141,6 +150,12 @@ sequenceDiagram
 | **Rules + skills** *(0.3)* | around | Rules in the instructions, skill index, `mcp_get_skill`, best skill suggested in search | The team handbook, available to every assistant |
 | **Elicitation + sampling passthrough** *(0.3)* | around | Downstream servers can ask the user or the model through the gateway | Putting a call through to the right desk |
 | **Sandboxed code mode** *(0.3)* | around | Separate process, Node permission model (no fs/child processes), memory cap, hard timeout | A locked workroom with one phone line |
+| **Pinned signatures** *(0.4)* | before | Chosen tools always listed with one-line signatures, so writes need no search | Daily numbers on a sticky note |
+| **Workflow tools** *(0.4)* | around | A configured multi-step job in one call (`wf__name`): values flow between steps, one confirmation, precise failure report, trimmed output | "The usual, please" |
+| **Workflow suggestions** *(0.4)* | around | `npm run report` finds repeated call sequences and prints a workflow skeleton to review | A waiter noticing your usual order |
+| **Slim meta-tools, lean search** *(0.4)* | before | Shorter descriptions every turn; one-line search hits; repeated tool inventories dropped | A pocket card instead of a brochure |
+| **Name-aware search ranking** *(0.4)* | before | Name matches beat descriptions that repeat a common word; "how many" finds count tools | Finding the shop by its sign |
+| **Multi-table replies** *(0.4)* | after | A reply with several lists becomes several small tables | One spreadsheet tab per list |
 
 ## 🚀 Quick start
 
@@ -246,6 +261,27 @@ Full example: [`config/servers.example.json`](config/servers.example.json).
 | `clientFeatures.elicitation` / `sampling` | Forward downstream user prompts / model requests to the agent's client (off by default) |
 | `codeMode.isolation` / `memoryMb` | `process` (default, sandboxed) or `vm` (trusted only) |
 | `results.dedupe` | A byte-identical repeat result becomes a one-line pointer |
+| `discovery.pinnedSignatures` *(0.4)* | Globs of tools whose one-line signatures are always in the instructions (e.g. the 10–12 most-used write tools, `wf__*`) |
+| `discovery.metaToolStyle` / `signatureStyle` / `alsoStyle` *(0.4)* | `slim` meta-tools; search hits as `oneline`; other hits by `name` only |
+| `workflows` *(0.4)* | Named multi-step jobs: `description`, `input`, `steps[] {id, tool, arguments, forEach, fields, report}`, `output`. Templates: `${input.x}`, `${steps.id.path}`, `${item}`. See `config/servers.example.json` |
+
+**Workflow example** (the agent calls `wf__repo_overview` once instead of three tools):
+
+```json
+"workflows": {
+  "repo_overview": {
+    "description": "Latest commits, open issues and open PRs of a repo in one call. Not for details of one item.",
+    "input": { "properties": { "owner": { "type": "string" }, "repo": { "type": "string" } }, "required": ["owner", "repo"] },
+    "steps": [
+      { "id": "commits", "tool": "github__list_commits", "arguments": { "owner": "${input.owner}", "repo": "${input.repo}", "perPage": 5 }, "fields": ["sha", "commit.message"] },
+      { "id": "issues", "tool": "github__list_issues", "arguments": { "owner": "${input.owner}", "repo": "${input.repo}", "state": "open", "per_page": 5 }, "fields": ["number", "title"] }
+    ],
+    "output": { "commits": "${steps.commits}", "issues": "${steps.issues}" }
+  }
+}
+```
+
+Every step goes through the normal safety rules; writes need one `confirm: true` for the whole workflow; it stops at the first failure and says which steps ran; each step's full reply stays behind a handle.
 
 Tools are classed **read** or **write** from MCP `readOnlyHint` annotations first, then from verbs in the name. Unknown verbs count as **write**, so they are never cached and always need confirmation.
 
@@ -253,10 +289,10 @@ Tools are classed **read** or **write** from MCP `readOnlyHint` annotations firs
 
 | Command | What it does |
 |---|---|
-| `npm test` | Build + 55 unit, integration and feature tests (full MCP round trips against a mock server) |
+| `npm test` | Build + 65 unit, integration and feature tests (full MCP round trips against a mock server) |
 | `npm run test:github` | Live check through the real CLI over stdio against the GitHub MCP server (no token needed for public repos) |
 | `npm run bench:github` | Live A/B token benchmark: passthrough vs gateway (`GITHUB_REPO=owner/name` to change the repo) |
-| `npm run bench:compare -- <dir>` | Live 3-way benchmark: no gateway vs an older build (`<dir>` = its `dist`) vs this build |
+| `npm run bench:compare -- <dir> [--only tuned]` | Live benchmark: no gateway vs an older build (`<dir>` = its `dist`) vs this build (defaults and tuned) |
 | `npm run report` | Savings report from `.zak-gateway/stats.jsonl`: per tool, turns by kind, suggested default fields |
 
 ### Agent UI (real-model A/B)
@@ -299,7 +335,8 @@ zak-mcp-gateway/
 
 | Document | Contents |
 |---|---|
-| [ZAK_Gateway_How_It_Works.pdf](docs/ZAK_Gateway_How_It_Works.pdf) | **Start here.** Every technique in plain words, diagrams, analogies, measured results |
+| [ZAK_Gateway_How_It_Works.pdf](docs/ZAK_Gateway_How_It_Works.pdf) | **Start here.** Every technique in plain words, diagrams, analogies, measured results (v0.4) |
+| [docs/versions/](docs/versions) | One release note per version: what is new, fixed and measured |
 | [MCP_Gateway_Architecture_and_Build_Plan.pdf](docs/MCP_Gateway_Architecture_and_Build_Plan.pdf) | The build plan this version implements |
 | [LAUNCH_CONFIGURATIONS_GUIDE.html](docs/LAUNCH_CONFIGURATIONS_GUIDE.html) | VS Code launch and debug configurations |
 | [Token-Optimized MCP Architecture Whitepaper.pdf](docs/Token-Optimized%20MCP%20Architecture%20Whitepaper.pdf) · [CONCEPT_EXPLAINER.pdf](docs/CONCEPT_EXPLAINER.pdf) · [IMPLEMENTATION_ROADMAP.pdf](docs/IMPLEMENTATION_ROADMAP.pdf) | Earlier concept docs (their benchmark figures are projections, not measurements) |
@@ -315,14 +352,19 @@ zak-mcp-gateway/
 | 5 · Benchmark (10–20 real-model tasks over 3+ servers, success rates) | 🟡 GitHub 3-way benchmark + live Gemini runs done; multi-server real-model run pending |
 | 6 · Advanced (sandboxed code mode, safe cache, tool preload, suggested default fields ✅; cheap-model router ⏳) | 🟡 mostly done |
 | Economy plan (14 ideas) + weak-model precision plan | ✅ v0.3: all 14 ideas plus 6 extras; agent UI: focused tools, history trimming, verifier, skill preload |
+| Next-steps plan (7 improvements) | ✅ v0.4: pinned signatures, workflow tools + suggestions, cheaper turns, leaner search, search fix; trimming + caching documented for hosts |
+| Next | ⏳ Re-run the company lean benchmark with pinned write signatures + a build workflow; live-model run; evaluation set; name → ID resolution |
 
-## 🏷️ Version history
+## 🏷️ Versions
 
-| Version | Highlights |
-|---|---|
-| **0.3.0** (Oct 2026) | Economy upgrade: per-server distill modes and limits, compact search, catalog modes, hot signatures, forwarded server instructions, synonyms, batch calls with write preview, default-argument pushdown, aggregation on handles, path reads, safe cache (overrides, writeIf, groups, TTL, fresh), write receipts, `$ref` + patch, rules and skills, elicitation/sampling passthrough, sandboxed code mode, dedupe, turns + suggested fields in `report`. Agent UI: focused tools, history trimming, answer verifier, skill preload. |
-| 0.2.0 (Oct 2026) | Build-plan upgrade: `mcp_get_result` + handles, TSV and noise filtering, safety policy, stats/report/budget, argument repair, tool index, code mode, passthrough A/B mode, remote HTTP servers, `${VAR}` secrets, agent-UI A/B harness. Fixes: colliding cache keys, caching never enabled, double-encoded results, placeholder token overriding env (GitHub 401), `::` vs `__` names, projection through arrays. |
-| 0.1.0 | Initial scaffold: 2 meta-tools, BM25 search, TypeScript signatures, SHA cache, projection and null pruning. |
+Each version has a short release note (what is new, what was fixed, what was measured) in [`docs/versions/`](docs/versions). Rebuild them with `node docs/src/versions/build-versions.mjs`.
+
+| Version | Date | Theme | Highlights | Release note |
+|---|---|---|---|---|
+| **0.4.0** | 6 Oct 2026 | Fewer turns, cheaper turns | Pinned signatures, workflow tools + suggestions, slim meta-tools, lean search replies, name-aware search ranking, multi-table replies. Fixes: workflow output trimming, search ranking. GitHub: −42% vs v0.3 (searching vs pinned). | [v0.4](docs/versions/ZAK_Gateway_v0.4.pdf) |
+| 0.3.0 | 5 Oct 2026 | Economy upgrade | Per-server modes, compact search, catalog modes, hot signatures, batch, default args, aggregation, safe cache, receipts, `$ref` + patch, rules + skills, elicitation/sampling, sandboxed code mode; agent-UI helpers. Lean: −58% / −49%. | [v0.3](docs/versions/ZAK_Gateway_v0.3.pdf) |
+| 0.2.0 | 4 Oct 2026 | Build-plan upgrade | Handles, noise removal + TSV, safety policy, stats + report + budget, argument repair, remote servers, `${VAR}` secrets, passthrough A/B; many v0.1 bugs fixed. GitHub: −93%. | [v0.2](docs/versions/ZAK_Gateway_v0.2.pdf) |
+| 0.1.0 | 2–3 Oct 2026 | First scaffold | Two meta-tools, BM25 search, TypeScript signatures, SHA cache, projection, null pruning. | [v0.1](docs/versions/ZAK_Gateway_v0.1.pdf) |
 
 ## 📄 License
 

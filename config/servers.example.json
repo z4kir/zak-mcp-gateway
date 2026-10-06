@@ -1,16 +1,28 @@
 {
   "gateway": {
     "name": "zak-mcp-gateway",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "logLevel": "info",
-    "cache": { "enabled": true, "exactMatchTtlSeconds": 300, "maxEntries": 1000 },
+    "cache": {
+      "enabled": true,
+      "exactMatchTtlSeconds": 300,
+      "maxEntries": 1000
+    },
     "discovery": {
       "maxSearchResults": 5,
       "minScore": 0.2,
       "catalog": "names",
       "fullSignatures": 1,
       "hotSignatures": 0,
-      "serverInstructionsMaxChars": 600
+      "serverInstructionsMaxChars": 600,
+      "pinnedSignatures": [
+        "github__list_commits",
+        "github__list_issues",
+        "wf__*"
+      ],
+      "metaToolStyle": "standard",
+      "signatureStyle": "full",
+      "alsoStyle": "summary"
     },
     "results": {
       "inlineTokenLimit": 1500,
@@ -21,43 +33,200 @@
       "writeReceipts": false,
       "dedupe": false
     },
-    "safety": { "readOnly": false, "confirmWrites": true, "allow": [], "deny": [], "warnOnInjection": true },
-    "stats": { "enabled": true, "logFile": "../.zak-gateway/stats.jsonl", "sessionTokenBudget": 0 },
-    "codeMode": { "enabled": false, "isolation": "process", "timeoutMs": 30000, "maxToolCalls": 25, "memoryMb": 64 },
-    "knowledge": { "rulesFile": "rules.md", "skillsDir": "skills" },
-    "clientFeatures": { "elicitation": false, "sampling": false }
+    "safety": {
+      "readOnly": false,
+      "confirmWrites": true,
+      "allow": [],
+      "deny": [],
+      "warnOnInjection": true
+    },
+    "stats": {
+      "enabled": true,
+      "logFile": "../.zak-gateway/stats.jsonl",
+      "sessionTokenBudget": 0
+    },
+    "codeMode": {
+      "enabled": false,
+      "isolation": "process",
+      "timeoutMs": 30000,
+      "maxToolCalls": 25,
+      "memoryMb": 64
+    },
+    "knowledge": {
+      "rulesFile": "rules.md",
+      "skillsDir": "skills"
+    },
+    "clientFeatures": {
+      "elicitation": false,
+      "sampling": false
+    },
+    "workflows": {
+      "repo_overview": {
+        "description": "Latest 5 commits, open issues and open pull requests of a repo in one call. Not for details of one item.",
+        "input": {
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "steps": [
+          {
+            "id": "commits",
+            "tool": "github__list_commits",
+            "arguments": {
+              "owner": "${input.owner}",
+              "repo": "${input.repo}",
+              "perPage": 5
+            },
+            "fields": [
+              "sha",
+              "commit.message"
+            ]
+          },
+          {
+            "id": "issues",
+            "tool": "github__list_issues",
+            "arguments": {
+              "owner": "${input.owner}",
+              "repo": "${input.repo}",
+              "state": "open",
+              "per_page": 5
+            },
+            "fields": [
+              "number",
+              "title"
+            ]
+          },
+          {
+            "id": "prs",
+            "tool": "github__list_pull_requests",
+            "arguments": {
+              "owner": "${input.owner}",
+              "repo": "${input.repo}",
+              "state": "open",
+              "per_page": 5
+            },
+            "fields": [
+              "number",
+              "title"
+            ]
+          }
+        ],
+        "output": {
+          "commits": "${steps.commits}",
+          "issues": "${steps.issues}",
+          "prs": "${steps.prs}"
+        }
+      }
+    }
   },
   "mcpServers": {
     "github": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}" },
-      "dropKeys": ["url", "permissions", "reactions", "performed_via_github_app", "author_association", "site_admin", "user_view_type", "verification", "sub_issues_summary"],
-      "projections": {
-        "list_commits": ["sha", "commit.message", "commit.author.name", "commit.author.date", "html_url"],
-        "list_issues": ["number", "title", "state", "user.login", "labels.name", "comments", "created_at", "updated_at", "html_url", "pull_request.html_url"]
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
       },
-      "synonyms": { "pr": ["pull", "request"] }
+      "dropKeys": [
+        "url",
+        "permissions",
+        "reactions",
+        "performed_via_github_app",
+        "author_association",
+        "site_admin",
+        "user_view_type",
+        "verification",
+        "sub_issues_summary"
+      ],
+      "projections": {
+        "list_commits": [
+          "sha",
+          "commit.message",
+          "commit.author.name",
+          "commit.author.date",
+          "html_url"
+        ],
+        "list_issues": [
+          "number",
+          "title",
+          "state",
+          "user.login",
+          "labels.name",
+          "comments",
+          "created_at",
+          "updated_at",
+          "html_url",
+          "pull_request.html_url"
+        ]
+      },
+      "synonyms": {
+        "pr": [
+          "pull",
+          "request"
+        ]
+      }
     },
     "compact-server": {
       "url": "https://mcp.example.internal/mcp",
-      "headers": { "Authorization": "Bearer ${COMPACT_SERVER_TOKEN}" },
-      "results": { "inlineTokenLimit": 8000, "distill": "light", "writeReceipts": true },
-      "defaultArgs": { "list_records": { "limit": 20 } },
-      "access": { "open_session": "write" },
-      "writeIf": { "fetch_page": { "save": true } },
+      "headers": {
+        "Authorization": "Bearer ${COMPACT_SERVER_TOKEN}"
+      },
+      "results": {
+        "inlineTokenLimit": 8000,
+        "distill": "light",
+        "writeReceipts": true
+      },
+      "defaultArgs": {
+        "list_records": {
+          "limit": 20
+        }
+      },
+      "access": {
+        "open_session": "write"
+      },
+      "writeIf": {
+        "fetch_page": {
+          "save": true
+        }
+      },
       "cacheGroup": "backend-a",
       "cacheTtlSeconds": 60,
-      "synonyms": { "ticket": ["incident"], "ci": ["cmdb"] }
+      "synonyms": {
+        "ticket": [
+          "incident"
+        ],
+        "ci": [
+          "cmdb"
+        ]
+      }
     },
     "filesystem": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${HOME:-C:\\Users\\you}/projects"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "${HOME:-C:\\Users\\you}/projects"
+      ],
       "pinned": false
     },
     "postgres": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-postgres", "${DATABASE_URL}"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "${DATABASE_URL}"
+      ],
       "readOnly": true,
       "cache": false
     }

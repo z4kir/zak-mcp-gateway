@@ -66,7 +66,7 @@ interface Rows {
  */
 export class EgressDistiller {
   constructor(
-    private config: GatewayResultsConfig,
+    public readonly config: GatewayResultsConfig,
     public readonly store: ResultStore
   ) {}
 

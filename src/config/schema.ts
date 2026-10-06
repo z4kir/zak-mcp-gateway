@@ -74,7 +74,50 @@ export const GatewayDiscoveryConfigSchema = z.object({
   /** Put one-line signatures of the N most-used tools (from the stats log) in the instructions. */
   hotSignatures: z.number().int().nonnegative().default(0),
   /** Max characters of each downstream server's own instructions to forward (0 = none). */
-  serverInstructionsMaxChars: z.number().int().nonnegative().default(600)
+  serverInstructionsMaxChars: z.number().int().nonnegative().default(600),
+  /**
+   * Tools whose one-line signatures always go into the instructions, so the agent can call
+   * them without searching (globs over namespaced names, e.g. "lean__ap_create_*").
+   */
+  pinnedSignatures: z.array(z.string()).default([]),
+  /** "slim" meta-tools: shorter descriptions, no parameter notes (fewer tokens every turn). */
+  metaToolStyle: z.enum(["standard", "slim"]).default("standard"),
+  /** Full search hits as multi-line signatures with parameter notes, or one line each. */
+  signatureStyle: z.enum(["full", "oneline"]).default("full"),
+  /** The other search hits as "name: summary" or just the name. */
+  alsoStyle: z.enum(["summary", "name"]).default("summary")
+});
+
+/** A step of a workflow: one tool call, optionally repeated for each item of a list. */
+export const WorkflowStepSchema = z.object({
+  /** Name used to refer to this step's result: ${steps.<id>.path}. */
+  id: z.string().optional(),
+  /** Namespaced tool name, e.g. "github__list_issues". */
+  tool: z.string(),
+  /** Arguments; strings may contain ${input.x}, ${steps.id.path} or ${item.x}. */
+  arguments: z.record(z.unknown()).default({}),
+  /** Run once per element of this list, e.g. "${input.columns}"; the element is ${item}. */
+  forEach: z.string().optional(),
+  /** Fields of this step's result to show in the summary (paths). */
+  report: z.array(z.string()).default([]),
+  /**
+   * Fields kept when ${steps.<id>} is used in the workflow output (default: the server's
+   * projection for that tool). Arguments always see the full result.
+   */
+  fields: z.array(z.string()).optional()
+});
+
+export const WorkflowSchema = z.object({
+  /** When to use it, and when not to. Shown to the agent. */
+  description: z.string(),
+  /** Inputs the agent provides (JSON Schema properties). */
+  input: z.object({
+    properties: z.record(z.unknown()).default({}),
+    required: z.array(z.string()).default([])
+  }).default({}),
+  steps: z.array(WorkflowStepSchema).min(1),
+  /** Optional final summary values, e.g. { "table": "${steps.table.name}" }. */
+  output: z.record(z.unknown()).optional()
 });
 
 export const GatewayResultsConfigSchema = z.object({
@@ -149,7 +192,7 @@ export const GatewayClientFeaturesSchema = z.object({
 export const GatewayConfigSchema = z.object({
   gateway: z.object({
     name: z.string().default("zak-mcp-gateway"),
-    version: z.string().default("0.3.0"),
+    version: z.string().default("0.4.0"),
     logLevel: z.enum(["debug", "info", "warn", "error"]).default("info"),
     cache: GatewayCacheConfigSchema.default({}),
     discovery: GatewayDiscoveryConfigSchema.default({}),
@@ -158,7 +201,9 @@ export const GatewayConfigSchema = z.object({
     stats: GatewayStatsConfigSchema.default({}),
     codeMode: GatewayCodeModeConfigSchema.default({}),
     knowledge: GatewayKnowledgeConfigSchema.default({}),
-    clientFeatures: GatewayClientFeaturesSchema.default({})
+    clientFeatures: GatewayClientFeaturesSchema.default({}),
+    /** Named multi-step jobs the agent can run in one call: "wf__<name>". */
+    workflows: z.record(WorkflowSchema).default({})
   }).passthrough().default({}),
   mcpServers: z.record(DownstreamServerConfigSchema).default({})
 }).passthrough();
@@ -168,3 +213,5 @@ export type DownstreamServerConfig = z.infer<typeof DownstreamServerConfigSchema
 export type GatewayResultsConfig = z.infer<typeof GatewayResultsConfigSchema>;
 export type GatewaySafetyConfig = z.infer<typeof GatewaySafetyConfigSchema>;
 export type DistillMode = z.infer<typeof ServerResultsConfigSchema>["distill"];
+export type WorkflowConfig = z.infer<typeof WorkflowSchema>;
+export type WorkflowStepConfig = z.infer<typeof WorkflowStepSchema>;

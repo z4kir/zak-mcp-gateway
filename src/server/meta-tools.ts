@@ -84,3 +84,22 @@ export const MCP_GET_SKILL: Tool = {
     required: ["name"]
   }
 };
+
+const SLIM_DESCRIPTIONS: Record<string, string> = {
+  mcp_search_tools: "Find tools by intent; returns signatures.",
+  mcp_call_tool: "Call a tool by name (or several via calls); big results return a handle.",
+  mcp_get_result: "Read a stored result: page, grep, fields, path, raw, count, group_by, distinct, sort.",
+  mcp_get_skill: "Load a skill by name.",
+  mcp_run_code: "Run JS in a sandbox: await call(tool, args); only the return value comes back."
+};
+
+/** "slim" style: one short description per meta-tool and no parameter descriptions. */
+export function slimMetaTool(tool: Tool): Tool {
+  const properties = Object.fromEntries(
+    Object.entries((tool.inputSchema.properties ?? {}) as Record<string, Record<string, unknown>>).map(([name, prop]) => {
+      const { description: _drop, ...rest } = prop;
+      return [name, rest];
+    })
+  );
+  return { ...tool, description: SLIM_DESCRIPTIONS[tool.name] ?? tool.description, inputSchema: { ...tool.inputSchema, properties } };
+}

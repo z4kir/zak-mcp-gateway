@@ -1,6 +1,6 @@
 {
   "name": "zak-mcp-gateway",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Universal Token-Optimized Model Context Protocol (TO-MCP) Gateway & Middleware Proxy",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -17,7 +17,7 @@
     "test:github": "node tests/test-github-live.mjs",
     "bench:github": "node tests/benchmark-github.mjs",
     "report": "node dist/cli.js report",
-    "bench:compare": "node tests/benchmark-compare.mjs --v02"
+    "bench:compare": "node tests/benchmark-compare.mjs --prev"
   },
   "keywords": [
     "mcp",

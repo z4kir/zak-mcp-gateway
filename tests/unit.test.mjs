@@ -278,3 +278,8 @@ test("config: ${VAR} interpolation with defaults", () => {
   assert.equal(interpolateEnv("${MISSING:-dflt}", {}), "dflt");
   assert.equal(interpolateEnv("${MISSING}", {}), undefined);
 });
+
+test("TSV sections for objects holding several lists", () => {
+  const out = FormatConverter.render({ total: 2, issues: [{ n: 1, t: "a" }, { n: 2, t: "b" }], prs: [{ n: 7, t: "x" }, { n: 8, t: "y" }] });
+  assert.equal(out, '{"total":2}\nissues:\nn\tt\n1\ta\n2\tb\nprs:\nn\tt\n7\tx\n8\ty');
+});

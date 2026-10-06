@@ -41,10 +41,10 @@ export class FormatConverter {
       const entries = Object.entries(value as Row);
       const tables = entries.filter(([, v]) => this.isTabular(v));
       const rest = entries.filter(([, v]) => !this.isTabular(v));
-      if (tables.length === 1 && rest.every(([, v]) => v === null || typeof v !== "object")) {
-        const [key, rows] = tables[0];
+      if (tables.length >= 1 && rest.every(([, v]) => v === null || typeof v !== "object")) {
+        // One section per table: {count: 2, issues: [...], prs: [...]} -> meta line + "issues:" TSV + "prs:" TSV
         const meta = rest.length ? `${JSON.stringify(Object.fromEntries(rest))}\n` : "";
-        tsv = `${meta}${key}:\n${this.toTsv(rows as Row[])}`;
+        tsv = meta + tables.map(([key, rows]) => `${key}:\n${this.toTsv(rows as Row[])}`).join("\n");
       }
     }
     return tsv !== undefined && estimateTokens(tsv) < estimateTokens(json) ? tsv : json;

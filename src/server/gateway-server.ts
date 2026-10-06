@@ -12,6 +12,7 @@ import { ValidatedGatewayConfig } from "../config/schema.js";
 import { DownstreamClientPool } from "../downstream/client-pool.js";
 import { ToolDiscoveryEngine } from "../discovery/search-index.js";
 import { buildCatalog, CatalogMode } from "../discovery/catalog.js";
+import { matchesAny } from "../util/glob.js";
 import { ExactMatchShaCache } from "../gate/sha-cache.js";
 import { PolicyEngine } from "../gate/policy.js";
 import { ResultStore } from "../results/result-store.js";
@@ -23,8 +24,9 @@ import { SchemaTranspiler } from "../synthesizer/ts-transpiler.js";
 import { DownstreamTool, ToolResult } from "../types/tool.js";
 import { estimateTokens } from "../util/tokens.js";
 import { log } from "../util/log.js";
-import { MCP_SEARCH_TOOLS, MCP_CALL_TOOL, MCP_GET_RESULT, MCP_RUN_CODE, MCP_GET_SKILL } from "./meta-tools.js";
+import { MCP_SEARCH_TOOLS, MCP_CALL_TOOL, MCP_GET_RESULT, MCP_RUN_CODE, MCP_GET_SKILL, slimMetaTool } from "./meta-tools.js";
 import { KnowledgeBase } from "../knowledge/knowledge-base.js";
+import { WorkflowRunner, WORKFLOW_PREFIX, workflowSummaryTokens } from "../execution/workflows.js";
 
 export interface GatewayServerOptions {
   /**
@@ -53,6 +55,7 @@ export class GatewayServer {
   private readonly cache: ExactMatchShaCache;
   private instructions = "";
   private readonly knowledge: KnowledgeBase;
+  private workflows?: WorkflowRunner;
 
   constructor(
     private config: ValidatedGatewayConfig & { configDir?: string },
@@ -91,6 +94,10 @@ export class GatewayServer {
     const tools = await this.pool.initializeServers(this.config.mcpServers);
     for (const server of Object.values(this.config.mcpServers)) this.discovery.addSynonyms(server.synonyms ?? {});
     this.discovery.registerTools(tools);
+    if (!this.options.passthrough && Object.keys(this.config.gateway.workflows).length) {
+      this.workflows = new WorkflowRunner(this.config.gateway.workflows, this.dispatcher, name => !!this.pool.resolveTool(name));
+      this.discovery.registerTools(this.workflows.asTools());
+    }
     this.instructions = this.buildInstructions();
 
     this.server = new Server(
@@ -143,6 +150,7 @@ export class GatewayServer {
     const meta = [MCP_SEARCH_TOOLS, MCP_CALL_TOOL, MCP_GET_RESULT];
     if (this.knowledge.hasSkills) meta.push(MCP_GET_SKILL);
     if (this.config.gateway.codeMode.enabled) meta.push(MCP_RUN_CODE);
+    const styled = this.config.gateway.discovery.metaToolStyle === "slim" ? meta.map(slimMetaTool) : meta;
     const pinned = this.visibleTools()
       .filter(t => t.isPinned)
       .map(t => ({
@@ -150,7 +158,7 @@ export class GatewayServer {
         description: t.description,
         inputSchema: pinnedSchema(t, this.config.gateway.safety.confirmWrites)
       }) as Tool);
-    return [...meta, ...pinned];
+    return [...styled, ...pinned];
   }
 
   /**
@@ -168,13 +176,13 @@ export class GatewayServer {
 
     // Hot signatures: the most-used tools from earlier sessions, so the agent can call them
     // without searching. Computed once at startup, so the instructions stay fixed.
-    if (d.hotSignatures > 0) {
-      const hot = this.stats
-        .topTools(d.hotSignatures)
-        .map(name => this.pool.getTool(name))
-        .filter((t): t is DownstreamTool => !!t && this.policy.isVisible(t));
-      if (hot.length) lines.push(`Frequently used (call directly):\n${hot.map(t => SchemaTranspiler.oneLine(t)).join("\n")}`);
-    }
+    // Pinned (configured) + hot (learned) signatures: tools the agent can call without searching.
+    const pinned = d.pinnedSignatures.length ? this.visibleTools().filter(t => matchesAny(t.namespacedName, d.pinnedSignatures)) : [];
+    const hot = d.hotSignatures > 0
+      ? this.stats.topTools(d.hotSignatures).map(name => this.pool.getTool(name)).filter((t): t is DownstreamTool => !!t && this.policy.isVisible(t))
+      : [];
+    const ready = [...new Map([...pinned, ...hot].map(t => [t.namespacedName, t])).values()];
+    if (ready.length) lines.push(`Call directly, no search needed:\n${ready.map(t => SchemaTranspiler.oneLine(t)).join("\n")}`);
 
     const knowledge = this.knowledge.instructionsBlock();
     if (knowledge) lines.push(knowledge);
@@ -184,7 +192,10 @@ export class GatewayServer {
         if (cfg.forwardInstructions === false) continue;
         const own = this.pool.getServerInstructions(serverId);
         if (!own) continue;
-        const text = own.replace(/\s+/g, " ");
+        // The catalog already lists this server's tools: drop sentences that are tool inventories.
+        const names = mode === "off" ? [] : this.visibleTools().filter(t => t.serverId === serverId).map(t => t.name);
+        const text = dropToolInventory(own, names).replace(/\s+/g, " ").trim();
+        if (!text) continue;
         const capped = text.length > d.serverInstructionsMaxChars ? `${text.slice(0, d.serverInstructionsMaxChars)}…` : text;
         lines.push(`[${serverId} notes] ${capped}`);
       }
@@ -235,13 +246,23 @@ export class GatewayServer {
         const skill = this.knowledge.match(query);
         const skillLine = skill ? `Relevant skill: ${skill.name} (load it with mcp_get_skill first)\n\n` : "";
         const text = matches.length
-          ? `${skillLine}${formatSearch(matches, full)}`
+          ? `${skillLine}${formatSearch(
+              matches.map(m => {
+                const tool = this.pool.getTool(m.namespacedName);
+                return { ...m, oneLine: tool ? SchemaTranspiler.oneLine(tool) : undefined };
+              }),
+              full,
+              { signature: this.config.gateway.discovery.signatureStyle, also: this.config.gateway.discovery.alsoStyle }
+            )}`
           : `${skillLine}No tools matched "${query}". Try other words. Servers: ${Object.keys(this.config.mcpServers).join(", ")}`;
         this.stats.recordCall({ via: "search", tool: "mcp_search_tools", rawTokens: 0, sentTokens: estimateTokens(text), cacheHit: false, ms: Date.now() - started });
         return { content: [{ type: "text", text }] };
       }
 
       case "mcp_call_tool":
+        if (typeof args.tool_name === "string" && this.workflows?.resolve(args.tool_name)) {
+          return this.runWorkflow(args.tool_name, args.arguments ?? {}, args.confirm === true);
+        }
         if (Array.isArray(args.calls)) {
           const calls = (args.calls as Record<string, unknown>[]).map(c => ({
             tool_name: String(c?.tool_name ?? ""),
@@ -311,6 +332,10 @@ export class GatewayServer {
         return this.handleRunCode(String(args.code ?? ""));
 
       default: {
+        if (name.startsWith(WORKFLOW_PREFIX) && this.workflows?.resolve(name)) {
+          const { confirm: wfConfirm, ...wfArgs } = args;
+          return this.runWorkflow(name, wfArgs, wfConfirm === true);
+        }
         // A downstream tool called directly by its namespaced name (pinned tools, or hosts
         // that declare searched tools as real functions). `confirm` is the gateway's write
         // flag unless the tool itself has a parameter with that name.
@@ -323,6 +348,23 @@ export class GatewayServer {
         );
       }
     }
+  }
+
+  private async runWorkflow(name: string, input: unknown, confirm: boolean): Promise<ToolResult> {
+    const started = Date.now();
+    const budgetError = this.dispatcher.budgetError();
+    if (budgetError) return { content: [{ type: "text", text: budgetError }], isError: true };
+    const { result, rawTokens } = await this.workflows!.run(name, input, confirm);
+    this.stats.recordCall({
+      via: "workflow",
+      tool: name.startsWith(WORKFLOW_PREFIX) ? name : `${WORKFLOW_PREFIX}${name}`,
+      rawTokens,
+      sentTokens: workflowSummaryTokens(result),
+      cacheHit: false,
+      blocked: result.isError ? "error" : undefined,
+      ms: Date.now() - started
+    });
+    return result;
   }
 
   private async handleRunCode(code: string): Promise<ToolResult> {
@@ -369,11 +411,38 @@ export class GatewayServer {
   }
 }
 
+/** Remove lines/sentences naming 3+ of the server's tools (an inventory the catalog already gives). */
+export function dropToolInventory(text: string, toolNames: string[]): string {
+  if (toolNames.length === 0) return text;
+  const names = new Set(toolNames.map(n => n.toLowerCase()));
+  return text
+    .split(/\n+/)
+    .map(line =>
+      line
+        .split(/(?<=[.;])\s+/)
+        .filter(sentence => {
+          const words = new Set(sentence.toLowerCase().match(/[a-z0-9_]+/g) ?? []);
+          return [...names].filter(n => words.has(n)).length < 3;
+        })
+        .join(" ")
+    )
+    .filter(line => line.trim())
+    .join("\n");
+}
+
 /** Top hits as full signatures, the rest as "name: summary" (detail:"full" shows all). */
-function formatSearch(matches: { namespacedName: string; signatureText: string; summary: string }[], fullCount: number): string {
-  const full = matches.slice(0, fullCount).map(m => m.signatureText);
-  const rest = matches.slice(fullCount).map(m => `- ${m.namespacedName}: ${m.summary}`);
-  return [...full, ...(rest.length ? [`also:\n${rest.join("\n")}`] : [])].join("\n\n");
+function formatSearch(
+  matches: { namespacedName: string; signatureText: string; summary: string; oneLine?: string }[],
+  fullCount: number,
+  style: { signature: "full" | "oneline"; also: "summary" | "name" } = { signature: "full", also: "summary" }
+): string {
+  const full = matches.slice(0, fullCount).map(m => (style.signature === "oneline" && m.oneLine ? m.oneLine : m.signatureText));
+  const others = matches.slice(fullCount);
+  if (others.length === 0) return full.join("\n\n");
+  const rest = style.also === "name"
+    ? `also: ${others.map(m => m.namespacedName).join(", ")}`
+    : `also:\n${others.map(m => `- ${m.namespacedName}: ${m.summary}`).join("\n")}`;
+  return [...full, rest].join(style.signature === "oneline" ? "\n" : "\n\n");
 }
 
 /** A tool exactly as its own server advertises it (the "standard MCP" baseline). */

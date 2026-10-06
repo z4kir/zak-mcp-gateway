@@ -129,7 +129,7 @@ test("B1 hot signatures: most-used tools from the stats log go into the instruct
   // reuse the first session's pool so the tool exists in this catalog
   g2.pool.getTool = n => first.gateway.pool.getTool(n);
   await g2.initialize();
-  assert.match(g2.getInstructions(), /Frequently used \(call directly\):\ntestdb__mock_read_db\(\{ table: string, perPage\?: number \}\)$/);
+  assert.match(g2.getInstructions(), /Call directly, no search needed:\ntestdb__mock_read_db\(\{ table: string, perPage\?: number \}\)$/);
   assert.ok(fs.existsSync(`${first.tmp}/stats.jsonl`));
   await g2.close();
 });
@@ -408,4 +408,161 @@ test("C3 path that names a per-row field falls back to row mode (found in a live
   assert.match(counted.text, /count: 100 rows matching grep \(of 300\)/);
   const field = await g.call("mcp_get_result", { handle: h, path: "t", limit: 2 });
   assert.match(field.text, /\nt\nitem 0\nitem 1$/);
+});
+
+// ============================== v0.4 ==============================
+
+test("v0.4 #1 pinned signatures: configured tools are callable without searching", async t => {
+  const g = await startGateway({ gateway: { discovery: { pinnedSignatures: ["testdb__mock_write_*", "testdb__mock_read_db"] } } });
+  t.after(g.close);
+  const ins = g.client.getInstructions();
+  assert.match(ins, /Call directly, no search needed:\ntestdb__mock_read_db\(\{ table: string, perPage\?: number \}\)\ntestdb__mock_write_db\(\{ table: string, data: object \}\)/);
+  assert.ok(!ins.includes("mock_get_note("), "only matching tools are pinned");
+});
+
+test("v0.4 #3 slim meta-tools are smaller; tool-inventory sentences are not forwarded twice", async t => {
+  const std = await startGateway();
+  t.after(std.close);
+  const slim = await startGateway({ gateway: { discovery: { metaToolStyle: "slim" } } });
+  t.after(slim.close);
+  const size = async g => estimateTokens(JSON.stringify((await g.client.listTools()).tools));
+  const [a, b] = [await size(std), await size(slim)];
+  assert.ok(b < a * 0.8, `slim ${b} vs standard ${a}`);
+  const { tools } = await slim.client.listTools();
+  assert.equal(tools.find(x => x.name === "mcp_call_tool").inputSchema.properties.tool_name.description, undefined);
+
+  const { dropToolInventory } = await import("../dist/server/gateway-server.js");
+  const text = "Use lowercase table names. Tools: mock_read_db, mock_write_db and mock_get_note are available.\nIds are integers.";
+  assert.equal(dropToolInventory(text, ["mock_read_db", "mock_write_db", "mock_get_note"]), "Use lowercase table names.\nIds are integers.");
+  assert.equal(dropToolInventory(text, []), text, "catalog off: nothing removed");
+});
+
+test("v0.4 #4 lean search replies: one-line top hit, names only for the rest", async t => {
+  const dflt = await startGateway();
+  t.after(dflt.close);
+  const lean = await startGateway({ gateway: { discovery: { signatureStyle: "oneline", alsoStyle: "name" } } });
+  t.after(lean.close);
+  const q = { query: "read database rows log", limit: 3 };
+  const a = await dflt.call("mcp_search_tools", q);
+  const b = await lean.call("mcp_search_tools", q);
+  assert.match(b.text, /^testdb__\w+\(\{[^\n]*\}\)\nalso: testdb__\w+(, testdb__\w+)*$/, "one signature line, then names");
+  assert.ok(!b.text.includes("//"), "no comment lines or parameter notes");
+  assert.ok(estimateTokens(b.text) < estimateTokens(a.text) * 0.6, `${estimateTokens(b.text)} vs ${estimateTokens(a.text)}`);
+});
+
+const WORKFLOWS = {
+  seed_table: {
+    description: "Write rows into a table and read the first two back. Not for updates.",
+    input: { properties: { table: { type: "string" }, rows: { type: "array" } }, required: ["table", "rows"] },
+    steps: [
+      { id: "before", tool: "testdb__mock_read_calls", arguments: { n: "${input.table}" } },
+      { id: "writes", tool: "testdb__mock_write_db", forEach: "${input.rows}", arguments: { table: "${input.table}", data: "${item}" }, report: ["inserted.v"] },
+      { id: "check", tool: "testdb__mock_read_db", arguments: { table: "${input.table}", perPage: 2 } }
+    ],
+    output: { first: "${steps.check[0].name}", written: "${steps.check[0].written}", label: "table ${input.table} has ${steps.check[0].written} writes" }
+  },
+  broken: {
+    description: "Fails on purpose in step 2.",
+    input: { properties: { table: { type: "string" } } },
+    steps: [
+      { tool: "testdb__mock_read_log", arguments: { lines: 1 } },
+      { tool: "testdb__mock_read_db", arguments: { table: "${input.nope}" } },
+      { tool: "testdb__mock_read_log", arguments: { lines: 2 } }
+    ]
+  },
+  ghost: { description: "Uses a tool that does not exist.", steps: [{ tool: "testdb__no_such_tool" }] }
+};
+
+test("v0.4 #2 workflows are listed, searchable and pinnable; unknown tools disable a workflow", async t => {
+  const g = await startGateway({ gateway: { workflows: WORKFLOWS, discovery: { pinnedSignatures: ["wf__*"] } } });
+  t.after(g.close);
+  const ins = g.client.getInstructions();
+  assert.match(ins, /wf \(prefix wf__\): seed_table, broken/);
+  assert.ok(!ins.includes("ghost"), "workflow with an unknown tool is disabled");
+  assert.match(ins, /wf__seed_table\(\{ table: string, rows: any\[\] \}\)/);
+  const s = await g.call("mcp_search_tools", { query: "seed table rows" });
+  assert.match(s.text, /^\/\/ \[wf\] Write rows into a table .*\(workflow: 3 steps in one call\)\nwf__seed_table\(/);
+});
+
+test("v0.4 #2 workflow: preview before writes, then all steps in one call with values passed along", async t => {
+  const g = await startGateway({ gateway: { workflows: WORKFLOWS } });
+  t.after(g.close);
+  const input = { table: "orders", rows: [{ v: 1 }, { v: 2 }] };
+  const preview = await g.call("mcp_call_tool", { tool_name: "wf__seed_table", arguments: input });
+  assert.equal(preview.isError, true);
+  assert.match(preview.text, /wf__seed_table changes data\. Steps:\n1\. testdb__mock_read_calls\n2\. testdb__mock_write_db for each of \$\{input\.rows\} \(changes data\)\n3\. testdb__mock_read_db\nConfirm with the user/);
+
+  const run = await g.call("mcp_call_tool", { tool_name: "wf__seed_table", arguments: input, confirm: true });
+  assert.ok(!run.isError, run.text);
+  assert.match(run.text, /^wf__seed_table ok \(3 steps\)\n1 before testdb__mock_read_calls ok \[r\d+\]\n2 writes testdb__mock_write_db ×2 ok \{"inserted\.v":\[1,2\]\} \[r\d+\.\.r\d+\]\n3 check testdb__mock_read_db ok \[r\d+\]\noutput: \{"first":"User 1","written":2,"label":"table orders has 2 writes"\}$/);
+
+  // direct call by name works too, and the full step results stay behind handles
+  const h = run.text.match(/3 check testdb__mock_read_db ok \[(r\d+)\]/)[1];
+  const page = await g.call("mcp_get_result", { handle: h, count: true });
+  assert.match(page.text, /count: 2 rows/);
+  const stats = g.gateway.stats.summary();
+  assert.ok(stats.rawTokens > stats.sentTokens, "step results were kept out of the model's context");
+});
+
+test("v0.4 #2 workflow stops at the first failing step and says exactly what ran", async t => {
+  const g = await startGateway({ gateway: { workflows: WORKFLOWS } });
+  t.after(g.close);
+  const r = await g.call("wf__broken", { table: "x" });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /^wf__broken stopped at step 2 \(steps 1-1 done; steps 3-3 not run\)\.\n1 testdb__mock_read_log ok \[r\d+\]\n2 testdb__mock_read_db FAILED: \$\{input\.nope\} has no value$/);
+  const bad = await g.call("mcp_call_tool", { tool_name: "wf__seed_table", arguments: { table: "t" }, confirm: true });
+  assert.match(bad.text, /Invalid input for wf__seed_table: missing required "rows"/);
+});
+
+test("v0.4 report suggests workflows from repeated call sequences", async () => {
+  const { suggestWorkflows } = await import("../dist/index.js");
+  assert.ok(suggestWorkflows, "suggestWorkflows is exported");
+  const c = (session, tool) => ({ type: "call", session, via: "call", tool, rawTokens: 0, sentTokens: 0, cacheHit: false, ms: 1, ts: "" });
+  const run = s => [c(s, "db__create_table"), c(s, "db__add_column"), c(s, "db__add_column"), c(s, "db__add_column"), c(s, "db__create_rule"), c(s, "db__read_rows")];
+  const flows = suggestWorkflows([...run("a"), ...run("b"), c("c", "db__read_rows")]);
+  assert.equal(flows.length, 1);
+  assert.equal(flows[0].count, 2);
+  assert.deepEqual(flows[0].steps.map(s => `${s.tool}${s.repeat > 1 ? "×" + s.repeat : ""}`), ["db__create_table", "db__add_column×3", "db__create_rule", "db__read_rows"]);
+  const wf = Object.values(flows[0].skeleton)[0];
+  assert.equal(wf.steps[1].forEach, "${input.items}");
+});
+
+test("v0.4 #5 search: name matches beat descriptions that repeat a common word", async () => {
+  const { ToolDiscoveryEngine } = await import("../dist/index.js");
+  const tools = JSON.parse(fs.readFileSync(new URL("./fixtures/lean-style-tools.json", import.meta.url))).map(t => ({
+    serverId: "lean", name: t.name, namespacedName: `lean__${t.name}`, description: t.description, inputSchema: { type: "object", properties: {} }, access: "write"
+  }));
+  const e = new ToolDiscoveryEngine();
+  e.registerTools(tools);
+  const top = q => e.search(q, 3, 0)[0]?.namespacedName;
+  assert.equal(top("add a column to a table"), "lean__ap_create_column");
+  assert.equal(top("add a field to a table"), "lean__ap_create_column");
+  assert.equal(top("how many rows per status"), "lean__ap_count_rows");
+  assert.equal(top("create a business rule"), "lean__ap_create_rule");
+  assert.equal(top("insert rows into a table"), "lean__ap_insert_rows");
+});
+
+test("v0.4 #2 workflow output is trimmed like normal replies; arguments still see full data", async t => {
+  const g = await startGateway({
+    gateway: {
+      workflows: {
+        peek: {
+          description: "Read users and echo the first id.",
+          input: { properties: { table: { type: "string" } }, required: ["table"] },
+          steps: [
+            { id: "users", tool: "testdb__mock_read_db", arguments: { table: "${input.table}", perPage: 3 }, fields: ["id", "name"] },
+            { id: "again", tool: "testdb__mock_read_db", arguments: { table: "${steps.users[0].avatar_url}" } }
+          ],
+          output: { users: "${steps.users}", again: "${steps.again}" }
+        }
+      }
+    }
+  });
+  t.after(g.close);
+  const r = await g.call("wf__peek", { table: "u" });
+  assert.ok(!r.isError, r.text);
+  const out = r.text.slice(r.text.indexOf("output: "));
+  assert.match(out, /users:\nid\tname\n1\tUser 1\n2\tUser 2\n3\tUser 3\n/, "fields respected, rendered as a table");
+  assert.ok(!out.includes("avatar_url") && !out.includes("node_id"), "noise keys removed from the output");
+  assert.match(r.text, /2 again testdb__mock_read_db ok/, "arguments could still use the raw avatar_url");
 });

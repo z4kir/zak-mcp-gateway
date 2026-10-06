@@ -1,0 +1,17 @@
+[
+  {"name": "ap_create_table", "description": "Create a new table in the app. Table names must be unique within the app."},
+  {"name": "ap_list_tables", "description": "List tables of an app, optionally filtered by table name prefix."},
+  {"name": "ap_get_table_schema", "description": "Get the schema of a table: its fields, types and table options."},
+  {"name": "ap_drop_table", "description": "Delete a table and all of its rows."},
+  {"name": "ap_create_column", "description": "Create a field on an existing table (name, type, label)."},
+  {"name": "ap_update_column", "description": "Change the type or label of an existing field."},
+  {"name": "ap_insert_rows", "description": "Insert one or more rows into a table."},
+  {"name": "ap_query_rows", "description": "Read rows from a table with filters, sorting and paging."},
+  {"name": "ap_count_rows", "description": "Count rows of a table, optionally grouped by a field."},
+  {"name": "ap_create_rule", "description": "Create a business rule that runs before or after insert/update on a table."},
+  {"name": "ap_create_widget", "description": "Create a UI widget with JSX source code."},
+  {"name": "ap_update_widget", "description": "Replace text inside a widget's JSX source (find/replace)."},
+  {"name": "ap_get_widget", "description": "Read a widget's full JSX source."},
+  {"name": "ap_activate_update_set", "description": "Make an update set the current one so changes are recorded in it."},
+  {"name": "ap_login", "description": "Log in to the app backend."}
+]

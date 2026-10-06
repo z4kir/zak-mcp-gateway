@@ -18,6 +18,11 @@ export class PolicyEngine {
     private servers: Record<string, Pick<DownstreamServerConfig, "readOnly">>
   ) {}
 
+  /** Writes are possible (not read-only) and need confirmation. */
+  public confirmWritesEnabled(): boolean {
+    return this.safety.confirmWrites && !this.safety.readOnly;
+  }
+
   public isVisible(tool: Pick<DownstreamTool, "namespacedName">): boolean {
     if (matchesAny(tool.namespacedName, this.safety.deny)) return false;
     if (this.safety.allow.length > 0 && !matchesAny(tool.namespacedName, this.safety.allow)) return false;
