@@ -566,3 +566,44 @@ test("v0.4 #2 workflow output is trimmed like normal replies; arguments still se
   assert.ok(!out.includes("avatar_url") && !out.includes("node_id"), "noise keys removed from the output");
   assert.match(r.text, /2 again testdb__mock_read_db ok/, "arguments could still use the raw avatar_url");
 });
+
+// ============================== npm package (v0.4.1) ==============================
+
+test("v0.4.1 init writes a starter config that loads, keeps stats in <project>/.zak-gateway, never overwrites silently", async () => {
+  const path = await import("node:path");
+  const os = await import("node:os");
+  const { execFileSync } = await import("node:child_process");
+  const { loadConfig } = await import("../dist/index.js");
+  const cli = path.resolve("dist/cli.js");
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), "zak-init-"));
+  const run = (...args) => execFileSync(process.execPath, [cli, ...args], { cwd: project, encoding: "utf-8", stdio: "pipe" });
+
+  const out = run("init");
+  const target = path.join(project, "config", "servers.json");
+  assert.ok(fs.existsSync(target), "default location matches the loader's default");
+  assert.match(out, /"zak-gateway"/, "prints the agent config snippet");
+  assert.match(out, /zak-mcp-gateway", "--config"/);
+  assert.match(out, /servers\.example\.json/, "points at the full example shipped in the package");
+
+  const config = await loadConfig(target);
+  assert.deepEqual(Object.keys(config.mcpServers), ["github"]);
+  assert.equal(config.mcpServers.github.env.GITHUB_PERSONAL_ACCESS_TOKEN, "${GITHUB_PERSONAL_ACCESS_TOKEN}", "secret stays a reference");
+  assert.equal(path.resolve(config.configDir, config.gateway.stats.logFile), path.join(project, ".zak-gateway", "stats.jsonl"));
+
+  assert.throws(() => run("init"), /already exists; pass --force/);
+  run("init", "--force");
+
+  run("init", "--config", "gateway.json");
+  const flat = await loadConfig(path.join(project, "gateway.json"));
+  assert.equal(path.resolve(flat.configDir, flat.gateway.stats.logFile), path.join(project, ".zak-gateway", "stats.jsonl"), "custom location keeps the same stats folder");
+  fs.rmSync(project, { recursive: true, force: true });
+});
+
+test("v0.4.1 --version prints the package version; the example config is valid", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { loadConfig } = await import("../dist/index.js");
+  const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf-8"));
+  assert.equal(execFileSync(process.execPath, ["dist/cli.js", "--version"], { encoding: "utf-8" }).trim(), pkg.version);
+  const example = await loadConfig("config/servers.example.json");
+  assert.equal(example.gateway.version, pkg.version, "example config tracks the package version");
+});

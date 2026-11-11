@@ -2,6 +2,7 @@
  * Builds one release note per version: docs/src/versions/vX.html -> docs/versions/ZAK_Gateway_vX.pdf
  *
  *   node docs/src/versions/build-versions.mjs            (CHROME env var overrides the browser path)
+ *   node docs/src/versions/build-versions.mjs 0.4.1      (only that version; older PDFs stay untouched)
  *
  * Add a new entry to VERSIONS for every release; earlier entries never change.
  */
@@ -136,8 +137,39 @@ const VERSIONS = [
       "Workflows sit next to the normal tools; give each a clear \"use for / not for\" description.",
       "Next: re-run the company lean benchmark with pinned write signatures and one build workflow, then a live-model run."
     ]
+  },
+  {
+    version: "0.4.1",
+    date: "11 Nov 2026",
+    theme: "Published on npm",
+    summary: "The gateway becomes an npm package any project can install. No change to how it saves tokens: same meta-tools, same defaults, same results as v0.4.",
+    analogy: "The concierge desk is now sold as a kit: every building installs its own with one command instead of copying the original.",
+    added: [
+      ["npm package", "npm install --save-dev zak-mcp-gateway; npx zak-mcp-gateway runs it. Ships only the compiled gateway, the example config, README and LICENSE.", "files list in package.json"],
+      ["init command", "Writes a small working config (one GitHub server, secrets as references) and prints the agent entry with real paths; cmd /c form on Windows; never overwrites without --force.", "zak-mcp-gateway init"],
+      ["--version", "Prints the installed version.", "zak-mcp-gateway --version"],
+      ["Library entry", "import or require the gateway and its parts, with TypeScript types.", "exports in package.json"],
+      ["Safer installs", "Minimum dependency versions raised to the tested ones (MCP SDK 1.32, MiniSearch 7.2, zod 3.25), so a project cannot pull in an older SDK without elicitation support.", "dependencies"],
+      ["Release checks", "npm publish runs the full test suite, then a clean build (no stale files, no source maps).", "prepublishOnly, prepack"]
+    ],
+    fixed: [],
+    measured: [
+      ["Package", "86.2 kB packed, 425.6 kB unpacked, 74 files"],
+      ["Tests", "67 of 67 pass (2 new: init and --version)"],
+      ["Installed into an empty project", "init, --version, import and require, and a full MCP session over stdio through npx (search, call, sandboxed code mode, report) all work"]
+    ],
+    notes: [
+      "Known: npm audit reports zod below 4.6.6 (memory use on oversized collections). zod only checks the local config file here and messages inside the MCP SDK; the fix needs zod 4, whose default handling changes the config schema, so it is planned as its own change.",
+      "Register only the gateway with an agent, with an absolute --config path."
+    ]
   }
 ];
+
+const only = process.argv[2];
+if (only && !VERSIONS.some(v => v.version === only)) {
+  console.error(`No version ${only} in VERSIONS.`);
+  process.exit(1);
+}
 
 const css = `
   :root { --ink:#1b1f24; --ink-2:#4a5360; --ink-3:#7a838f; --line:#dfe3e8; --soft:#f6f7f9; --teal:#0f8a7e; --amber:#9a6a00; --amber-soft:#fff6e0; }
@@ -172,7 +204,7 @@ ${v.fixed.length ? `<h2>Fixed</h2><table><tr><th>Problem</th><th>Result</th></tr
 }
 
 fs.mkdirSync(outDir, { recursive: true });
-for (const v of VERSIONS) {
+for (const v of VERSIONS.filter(v => !only || v.version === only)) {
   const html = path.join(here, `v${v.version}.html`);
   const pdf = path.join(outDir, `ZAK_Gateway_v${v.version}.pdf`);
   fs.writeFileSync(html, page(v));

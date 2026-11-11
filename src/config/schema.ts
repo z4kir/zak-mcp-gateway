@@ -192,7 +192,7 @@ export const GatewayClientFeaturesSchema = z.object({
 export const GatewayConfigSchema = z.object({
   gateway: z.object({
     name: z.string().default("zak-mcp-gateway"),
-    version: z.string().default("0.4.0"),
+    version: z.string().default("0.4.1"),
     logLevel: z.enum(["debug", "info", "warn", "error"]).default("info"),
     cache: GatewayCacheConfigSchema.default({}),
     discovery: GatewayDiscoveryConfigSchema.default({}),

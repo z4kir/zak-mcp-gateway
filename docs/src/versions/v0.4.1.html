@@ -1,0 +1,23 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>ZAK MCP Gateway v0.4.1</title><style>
+  :root { --ink:#1b1f24; --ink-2:#4a5360; --ink-3:#7a838f; --line:#dfe3e8; --soft:#f6f7f9; --teal:#0f8a7e; --amber:#9a6a00; --amber-soft:#fff6e0; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", Inter, Roboto, system-ui, sans-serif; color: var(--ink); margin: 0; padding: 28px 36px; font-size: 10.5pt; line-height: 1.5; background: #fff; }
+  h1 { font-size: 22pt; margin: 0; } h2 { font-size: 13pt; margin: 20px 0 6px; padding-bottom: 3px; border-bottom: 2px solid var(--line); }
+  .meta { color: var(--ink-2); margin: 4px 0 12px; } .chip { display:inline-block; background: var(--teal); color:#fff; border-radius: 10px; padding: 1px 9px; font-size: 9pt; font-weight: 700; vertical-align: 5px; margin-left: 6px; }
+  .summary { font-size: 11pt; } .analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); border-radius: 0 8px 8px 0; padding: 9px 13px; margin: 10px 0; } .analogy b { color: var(--amber); }
+  table { width: 100%; border-collapse: collapse; font-size: 9.4pt; margin: 6px 0; } th, td { border-bottom: 1px solid var(--line); padding: 5px 7px; text-align: left; vertical-align: top; } th { background: var(--soft); }
+  code { font-family: Consolas, monospace; font-size: 8.8pt; background: #eef1f4; padding: 0 4px; border-radius: 3px; }
+  ul { margin: 4px 0 4px 18px; padding: 0; } .muted { color: var(--ink-3); font-size: 9pt; }
+  @page { size: A4; margin: 14mm; } @media print { body { padding: 0; } tr, .analogy { break-inside: avoid; } }</style></head><body>
+<h1>ZAK MCP Gateway <span class="chip">v0.4.1</span></h1>
+<div class="meta">11 Nov 2026 · Published on npm</div>
+<p class="summary">The gateway becomes an npm package any project can install. No change to how it saves tokens: same meta-tools, same defaults, same results as v0.4.</p>
+<div class="analogy"><b>In one picture:</b> The concierge desk is now sold as a kit: every building installs its own with one command instead of copying the original.</div>
+<h2>What's new</h2>
+<table><tr><th>Feature</th><th>What it does (simply)</th><th style="width:24%">Where to switch it</th></tr><tr><td style="width:26%"><b>npm package</b></td><td>npm install --save-dev zak-mcp-gateway; npx zak-mcp-gateway runs it. Ships only the compiled gateway, the example config, README and LICENSE.</td><td>files list in <code>package.json</code></td></tr><tr><td style="width:26%"><b>init command</b></td><td>Writes a small working config (one GitHub server, secrets as references) and prints the agent entry with real paths; cmd /c form on Windows; never overwrites without --force.</td><td>zak-mcp-gateway init</td></tr><tr><td style="width:26%"><b>--version</b></td><td>Prints the installed version.</td><td>zak-mcp-gateway --version</td></tr><tr><td style="width:26%"><b>Library entry</b></td><td>import or require the gateway and its parts, with TypeScript types.</td><td>exports in <code>package.json</code></td></tr><tr><td style="width:26%"><b>Safer installs</b></td><td>Minimum dependency versions raised to the tested ones (MCP SDK 1.32, MiniSearch 7.2, zod 3.25), so a project cannot pull in an older SDK without elicitation support.</td><td>dependencies</td></tr><tr><td style="width:26%"><b>Release checks</b></td><td>npm publish runs the full test suite, then a clean build (no stale files, no source maps).</td><td>prepublishOnly, prepack</td></tr></table>
+
+<h2>Measured</h2>
+<table><tr><th>What</th><th>Result</th></tr><tr><td style="width:45%"><b>Package</b></td><td>86.2 kB packed, 425.6 kB unpacked, 74 files</td></tr><tr><td style="width:45%"><b>Tests</b></td><td>67 of 67 pass (2 new: init and --version)</td></tr><tr><td style="width:45%"><b>Installed into an empty project</b></td><td>init, --version, import and require, and a full MCP session over stdio through npx (search, call, sandboxed code mode, report) all work</td></tr></table>
+<h2>Notes</h2><ul><li>Known: npm audit reports zod below 4.6.6 (memory use on oversized collections). zod only checks the local config file here and messages inside the MCP SDK; the fix needs zod 4, whose default handling changes the config schema, so it is planned as its own change.</li><li>Register only the gateway with an agent, with an absolute --config path.</li></ul>
+<p class="muted">All versions: docs/versions · Full explanation: docs/ZAK_Gateway_How_It_Works.pdf</p>
+</body></html>

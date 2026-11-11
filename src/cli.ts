@@ -7,14 +7,79 @@ import { CallRecord, SessionRecord, StatsRecord } from "./stats/token-stats.js";
 import { suggestWorkflows } from "./stats/suggestions.js";
 
 const USAGE = `zak-mcp-gateway [--config <servers.json>] [--passthrough]
+zak-mcp-gateway init [--config <servers.json>] [--force]
 zak-mcp-gateway report [--config <servers.json> | --log <stats.jsonl>] [--session <id>]
+zak-mcp-gateway --version | --help
 
+  --config        config file (default: ./config/servers.json)
   --passthrough   expose every downstream tool raw (baseline for A/B measurement)
+  init            write a starter config and print how to connect your agent
   report          summarize token savings from the stats log`;
+
+/** Package folder (dist/..): the same from a git clone and from node_modules. */
+const PACKAGE_ROOT = path.resolve(__dirname, "..");
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
+}
+
+async function packageVersion(): Promise<string> {
+  const pkg = JSON.parse(await fs.readFile(path.join(PACKAGE_ROOT, "package.json"), "utf-8")) as { version: string };
+  return pkg.version;
+}
+
+const toSlashes = (p: string) => p.split(path.sep).join("/");
+
+/** Write a minimal working config into the user's project and print how to register the gateway. */
+async function init(args: string[]): Promise<void> {
+  const relTarget = flag(args, "--config") ?? path.join("config", "servers.json");
+  const target = path.resolve(process.cwd(), relTarget);
+  const exists = await fs.access(target).then(() => true, () => false);
+  if (exists && !args.includes("--force")) {
+    throw new Error(`${target} already exists; pass --force to overwrite it.`);
+  }
+
+  // Relative paths in the config resolve against its folder; keep the stats log in <project>/.zak-gateway/.
+  const statsLog = toSlashes(path.relative(path.dirname(target), path.join(process.cwd(), ".zak-gateway", "stats.jsonl")));
+  const starter = {
+    gateway: { stats: { enabled: true, logFile: statsLog } },
+    mcpServers: {
+      github: {
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-github"],
+        env: { GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_PERSONAL_ACCESS_TOKEN}" }
+      }
+    }
+  };
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, JSON.stringify(starter, null, 2) + "\n", "utf-8");
+
+  // Native Windows hosts cannot spawn npx directly; it needs the cmd /c wrapper.
+  const npxArgs = ["-y", "zak-mcp-gateway", "--config", toSlashes(target)];
+  const entry = process.platform === "win32" ? { command: "cmd", args: ["/c", "npx", ...npxArgs] } : { command: "npx", args: npxArgs };
+  const snippet = [
+    `{`,
+    `  "mcpServers": {`,
+    `    "zak-gateway": {`,
+    `      "command": ${JSON.stringify(entry.command)},`,
+    `      "args": [${entry.args.map(a => JSON.stringify(a)).join(", ")}]`,
+    `    }`,
+    `  }`,
+    `}`
+  ].map(line => `     ${line}`).join("\n");
+
+  console.log(`Created ${target} with one example server (GitHub).
+
+Next:
+  1. Add your MCP servers under "mcpServers" (same shape as in any MCP client config).
+     Full reference with every option: ${toSlashes(path.join(PACKAGE_ROOT, "config", "servers.example.json"))}
+     Keep secrets out of the file: write "\${MY_TOKEN}" and set MY_TOKEN in the environment.
+  2. Register only the gateway with your agent (.mcp.json for Claude Code, claude_desktop_config.json,
+     .cursor/mcp.json, ...) and remove the direct entries for the servers it now fronts:
+${snippet}
+  3. Add .zak-gateway/ to .gitignore (local token-savings log).
+     See the savings later with: npx zak-mcp-gateway report --config ${toSlashes(relTarget)}`);
 }
 
 async function serve(args: string[]): Promise<void> {
@@ -122,6 +187,11 @@ async function main() {
     console.log(USAGE);
     return;
   }
+  if (args.includes("--version") || args.includes("-v")) {
+    console.log(await packageVersion());
+    return;
+  }
+  if (args[0] === "init") return init(args.slice(1));
   if (args[0] === "report") return report(args.slice(1));
   return serve(args);
 }

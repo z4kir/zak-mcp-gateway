@@ -6,14 +6,18 @@
 
 One MCP server for your agent, every MCP server behind it, at a fraction of the tokens.
 
-![version](https://img.shields.io/badge/version-0.4.0-0f8a7e)
+[![npm](https://img.shields.io/npm/v/zak-mcp-gateway?color=cb3837&logo=npm)](https://www.npmjs.com/package/zak-mcp-gateway)
 ![node](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)
 ![typescript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)
 ![mcp sdk](https://img.shields.io/badge/MCP%20SDK-1.32-6b4bc4)
-![tests](https://img.shields.io/badge/tests-65%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-67%20passing-2ea44f)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
-[Why](#-why) · [Results](#-measured-results) · [How it works](#-how-it-works) · [Quick start](#-quick-start) · [Configuration](#%EF%B8%8F-configuration) · [Testing](#-testing--benchmarks) · [Docs](#-documentation)
+```bash
+npm install --save-dev zak-mcp-gateway && npx zak-mcp-gateway init
+```
+
+[Why](#-why) · [Results](#-measured-results) · [How it works](#-how-it-works) · [Install & quick start](#-quick-start) · [Configuration](#%EF%B8%8F-configuration) · [Testing](#-testing--benchmarks) · [Docs](#-documentation)
 
 </div>
 
@@ -159,7 +163,79 @@ sequenceDiagram
 
 ## 🚀 Quick start
 
-**Requirements:** Node.js 20+ and npm. `npx` downloads the downstream MCP servers on first run.
+**Requirements:** Node.js 20+ and npm. The gateway is published on npm as [`zak-mcp-gateway`](https://www.npmjs.com/package/zak-mcp-gateway), so any project can use it without cloning this repo. `npx` also downloads the downstream MCP servers on first run.
+
+### 1. Add it to your project
+
+```bash
+npm install --save-dev zak-mcp-gateway     # recommended: the version is pinned per project
+# or, without installing:     npx -y zak-mcp-gateway --help
+# or, as a global command:    npm install -g zak-mcp-gateway
+```
+
+### 2. Create the gateway config
+
+```bash
+npx zak-mcp-gateway init                   # writes config/servers.json (--config <path> for another place)
+```
+
+`init` writes a small working config with one example server (GitHub) and prints the exact agent entry for step 3, with your real paths filled in. It never overwrites an existing file unless you pass `--force`.
+
+Then add your own MCP servers under `mcpServers`, in the same shape as in any MCP client config. Every option is shown in [`config/servers.example.json`](config/servers.example.json), which also ships in the package (`node_modules/zak-mcp-gateway/config/servers.example.json`). Write secrets as `${VAR}` and set them in the environment:
+
+```bash
+export GITHUB_PERSONAL_ACCESS_TOKEN=ghp_...   # optional for public repos (PowerShell: $env:GITHUB_PERSONAL_ACCESS_TOKEN="...")
+```
+
+Add `.zak-gateway/` (the local token-savings log) to your `.gitignore`. A `servers.json` that only holds `${VAR}` references is safe to commit, so your team shares one setup.
+
+### 3. Connect your agent (Claude Code, Claude Desktop, Cursor, ...)
+
+Register **only the gateway**, and remove the entries for the servers it now fronts. For Claude Code that is the project's `.mcp.json`; Claude Desktop and Cursor use the same `mcpServers` shape:
+
+```json
+{
+  "mcpServers": {
+    "zak-gateway": {
+      "command": "npx",
+      "args": ["-y", "zak-mcp-gateway", "--config", "/absolute/path/to/your-project/config/servers.json"]
+    }
+  }
+}
+```
+
+| Situation | What to change |
+|---|---|
+| Native Windows (not WSL) | Start `npx` through cmd: `"command": "cmd", "args": ["/c", "npx", "-y", "zak-mcp-gateway", "--config", "C:/path/to/config/servers.json"]` (`init` prints this form on Windows) |
+| You want exactly the version in your `package.json`, with no `npx` lookup | `"command": "node", "args": ["/absolute/path/to/your-project/node_modules/zak-mcp-gateway/dist/cli.js", "--config", "..."]` |
+| Secrets | Set them in the host's `"env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "..." }` or in your shell environment, never in `servers.json` |
+
+Use an absolute `--config` path: hosts do not all start servers in your project folder. Relative paths *inside* the config (such as `stats.logFile`) resolve against the config file's folder.
+
+The agent now sees the meta-tools listed in [What the agent sees](#-what-the-agent-sees). See what you saved at any time:
+
+```bash
+npx zak-mcp-gateway report --config config/servers.json
+```
+
+To upgrade later: `npm install --save-dev zak-mcp-gateway@latest`, then restart the agent's MCP servers.
+
+### Use it as a library
+
+The package also exports the gateway's building blocks, with TypeScript types, for embedding in your own Node app. It works from both `import` and `require`:
+
+```ts
+import { loadConfig, GatewayServer } from "zak-mcp-gateway";
+
+const config = await loadConfig("config/servers.json");
+const gateway = new GatewayServer(config);
+await gateway.start();            // serves MCP over stdio, like the CLI
+// or: await gateway.connect(transport) for any other MCP transport
+```
+
+The config schema, search index, signature synthesizer, safety policy, distillers and result store are exported too (see [`src/index.ts`](src/index.ts)).
+
+### From source (contributors)
 
 ```bash
 git clone https://github.com/z4kir/zak-mcp-gateway.git
@@ -168,34 +244,22 @@ npm install
 npm run build
 
 cp config/servers.example.json config/servers.json   # then edit paths / servers
-export GITHUB_PERSONAL_ACCESS_TOKEN=ghp_...          # optional for public repos (PowerShell: $env:GITHUB_PERSONAL_ACCESS_TOKEN="...")
-
 node dist/cli.js --config config/servers.json
 ```
 
-### Use it from Claude Desktop, Cursor, or Claude Code
-
-Add one server entry and remove the individual servers it now fronts:
-
-```json
-{
-  "mcpServers": {
-    "zak-gateway": {
-      "command": "node",
-      "args": ["/absolute/path/zak-mcp-gateway/dist/cli.js", "--config", "/absolute/path/zak-mcp-gateway/config/servers.json"],
-      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..." }
-    }
-  }
-}
-```
+To run a local clone from an agent, point the entry at it: `"command": "node", "args": ["/absolute/path/zak-mcp-gateway/dist/cli.js", "--config", "/absolute/path/zak-mcp-gateway/config/servers.json"]`.
 
 ### CLI
 
 ```text
 zak-mcp-gateway [--config <servers.json>] [--passthrough]
+zak-mcp-gateway init [--config <servers.json>] [--force]
 zak-mcp-gateway report [--config <servers.json> | --log <stats.jsonl>] [--session <id>]
+zak-mcp-gateway --version | --help
 
+  --config        config file (default: ./config/servers.json)
   --passthrough   expose every downstream tool raw (baseline for A/B measurement)
+  init            write a starter config and print how to connect your agent
   report          summarize token savings from the stats log
 ```
 
@@ -289,7 +353,7 @@ Tools are classed **read** or **write** from MCP `readOnlyHint` annotations firs
 
 | Command | What it does |
 |---|---|
-| `npm test` | Build + 65 unit, integration and feature tests (full MCP round trips against a mock server) |
+| `npm test` | Build + 67 unit, integration and feature tests (full MCP round trips against a mock server, CLI `init`/`--version`) |
 | `npm run test:github` | Live check through the real CLI over stdio against the GitHub MCP server (no token needed for public repos) |
 | `npm run bench:github` | Live A/B token benchmark: passthrough vs gateway (`GITHUB_REPO=owner/name` to change the repo) |
 | `npm run bench:compare -- <dir> [--only tuned]` | Live benchmark: no gateway vs an older build (`<dir>` = its `dist`) vs this build (defaults and tuned) |
@@ -307,12 +371,20 @@ cd agent-ui && npm install && npm run dev
 
 Optional env: `GEMINI_MODEL`, `GATEWAY_ROOT`, `GATEWAY_CONFIG`.
 
+### Releasing to npm (maintainers)
+
+1. Bump the version in `package.json`, the `gateway.version` default in `src/config/schema.ts` and `config/servers.example.json` (a test checks they match). Add a row to [Versions](#%EF%B8%8F-versions) and a release note.
+2. `npm pack --dry-run` shows exactly what ships: `dist/` without source maps, `config/servers.example.json`, `README.md`, `LICENSE`. Local `config/servers.json`, stats logs, tests, docs and the agent UI are never included.
+3. `npm login` once per machine, then `npm publish`. It runs the full test suite first, then a clean build.
+4. Commit, tag `vX.Y.Z` and push.
+
 ## 📁 Project structure
 
 ```text
 zak-mcp-gateway/
 ├── src/
-│   ├── cli.ts                        # serve · --passthrough · report
+│   ├── cli.ts                        # serve · --passthrough · init · report · --version
+│   ├── index.ts                      # library exports (the npm package's main entry)
 │   ├── config/                       # zod schema, loader, ${VAR} secrets
 │   ├── downstream/client-pool.ts     # parallel stdio + HTTP connections, server__tool names
 │   ├── discovery/                    # MiniSearch BM25 + synonyms, catalog modes
@@ -361,11 +433,12 @@ Each version has a short release note (what is new, what was fixed, what was mea
 
 | Version | Date | Theme | Highlights | Release note |
 |---|---|---|---|---|
-| **0.4.0** | 6 Oct 2026 | Fewer turns, cheaper turns | Pinned signatures, workflow tools + suggestions, slim meta-tools, lean search replies, name-aware search ranking, multi-table replies. Fixes: workflow output trimming, search ranking. GitHub: −42% vs v0.3 (searching vs pinned). | [v0.4](docs/versions/ZAK_Gateway_v0.4.pdf) |
+| **0.4.1** | 11 Nov 2026 | Published on npm | `npm install zak-mcp-gateway` for any project; `init` writes a starter config and prints the agent entry (Windows-aware); `--version`; library exports with TypeScript types for `import` and `require`; minimum dependency versions raised to the tested ones (MCP SDK 1.32). Token behaviour unchanged from 0.4.0. | [v0.4.1](docs/versions/ZAK_Gateway_v0.4.1.pdf) |
+| 0.4.0 | 6 Oct 2026 | Fewer turns, cheaper turns | Pinned signatures, workflow tools + suggestions, slim meta-tools, lean search replies, name-aware search ranking, multi-table replies. Fixes: workflow output trimming, search ranking. GitHub: −42% vs v0.3 (searching vs pinned). | [v0.4](docs/versions/ZAK_Gateway_v0.4.pdf) |
 | 0.3.0 | 5 Oct 2026 | Economy upgrade | Per-server modes, compact search, catalog modes, hot signatures, batch, default args, aggregation, safe cache, receipts, `$ref` + patch, rules + skills, elicitation/sampling, sandboxed code mode; agent-UI helpers. Lean: −58% / −49%. | [v0.3](docs/versions/ZAK_Gateway_v0.3.pdf) |
 | 0.2.0 | 4 Oct 2026 | Build-plan upgrade | Handles, noise removal + TSV, safety policy, stats + report + budget, argument repair, remote servers, `${VAR}` secrets, passthrough A/B; many v0.1 bugs fixed. GitHub: −93%. | [v0.2](docs/versions/ZAK_Gateway_v0.2.pdf) |
 | 0.1.0 | 2–3 Oct 2026 | First scaffold | Two meta-tools, BM25 search, TypeScript signatures, SHA cache, projection, null pruning. | [v0.1](docs/versions/ZAK_Gateway_v0.1.pdf) |
 
 ## 📄 License
 
-MIT. See `license` in [`package.json`](package.json).
+MIT. See [`LICENSE`](LICENSE).

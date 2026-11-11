@@ -1,14 +1,27 @@
 {
   "name": "zak-mcp-gateway",
-  "version": "0.4.0",
-  "description": "Universal Token-Optimized Model Context Protocol (TO-MCP) Gateway & Middleware Proxy",
+  "version": "0.4.1",
+  "description": "Token-optimized MCP gateway: one MCP server in front of all your MCP servers, with compact tool search, trimmed results and safety rules.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "bin": {
-    "zak-mcp-gateway": "./dist/cli.js"
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
   },
+  "bin": {
+    "zak-mcp-gateway": "dist/cli.js"
+  },
+  "files": [
+    "dist/",
+    "!dist/**/*.map",
+    "config/servers.example.json"
+  ],
   "scripts": {
     "build": "tsc",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "watch": "tsc --watch",
     "start": "node dist/cli.js",
     "dev": "tsx src/cli.ts",
@@ -17,23 +30,41 @@
     "test:github": "node tests/test-github-live.mjs",
     "bench:github": "node tests/benchmark-github.mjs",
     "report": "node dist/cli.js report",
-    "bench:compare": "node tests/benchmark-compare.mjs --prev"
+    "bench:compare": "node tests/benchmark-compare.mjs --prev",
+    "prepublishOnly": "npm test",
+    "prepack": "npm run clean && npm run build"
   },
   "keywords": [
     "mcp",
     "model-context-protocol",
+    "mcp-server",
+    "mcp-gateway",
+    "mcp-proxy",
     "token-optimization",
     "llm",
     "agent",
+    "claude",
+    "cursor",
     "gateway",
     "proxy"
   ],
-  "author": "skzak",
+  "author": "skzak (https://github.com/z4kir)",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/z4kir/zak-mcp-gateway.git"
+  },
+  "homepage": "https://github.com/z4kir/zak-mcp-gateway#readme",
+  "bugs": {
+    "url": "https://github.com/z4kir/zak-mcp-gateway/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.6.1",
-    "minisearch": "^7.1.2",
-    "zod": "^3.24.2"
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "minisearch": "^7.2.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
