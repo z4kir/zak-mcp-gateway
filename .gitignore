@@ -15,6 +15,7 @@ agent-ui/next-env.d.ts
 
 # Local config & secrets (commit config/servers.example.json instead)
 config/servers.json
+config/servers.json.*
 .env
 .env.*
 *.pem
