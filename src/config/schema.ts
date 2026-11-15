@@ -192,8 +192,14 @@ export const GatewayClientFeaturesSchema = z.object({
 export const GatewayConfigSchema = z.object({
   gateway: z.object({
     name: z.string().default("zak-mcp-gateway"),
-    version: z.string().default("0.4.1"),
+    version: z.string().default("0.4.2"),
     logLevel: z.enum(["debug", "info", "warn", "error"]).default("info"),
+    /**
+     * Longest wait (ms) for downstream servers before answering the agent's MCP handshake.
+     * Servers still starting keep connecting in the background; calls to them wait for them.
+     * Agent hosts give a server about 30 s to start (Claude Code's default). 0 = wait for all.
+     */
+    startupWaitMs: z.number().int().nonnegative().default(15_000),
     cache: GatewayCacheConfigSchema.default({}),
     discovery: GatewayDiscoveryConfigSchema.default({}),
     results: GatewayResultsConfigSchema.default({}),

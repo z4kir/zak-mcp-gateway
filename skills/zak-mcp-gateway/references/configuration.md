@@ -103,6 +103,7 @@ The agent calls `wf__repo_overview` once. Steps follow the normal safety rules, 
 | `results` (per server) | `inlineTokenLimit`, `maxStringChars`, `distill: full / light / off`, `writeReceipts` |
 | `synonyms`, `defaultArgs`, `forwardInstructions` | Per-server search vocabulary, injected default arguments, forwarding of the server's own instructions |
 | `access`, `writeIf`, `cache`, `cacheTtlSeconds`, `cacheGroup` | Per-tool read/write overrides, argument-based writes, per-server cache control and shared invalidation |
+| `gateway.startupWaitMs` | Longest wait for the servers before answering the agent's handshake (15000; `0` = wait for all). Slower servers keep connecting, and calls to them wait for them. |
 | `gateway.cache` | `enabled`, `exactMatchTtlSeconds` (300), `maxEntries` (1000): identical read calls are answered from memory |
 | `gateway.discovery` | `maxSearchResults` (5), `minScore`, `catalog` (`names` / `groups` / `servers` / `off`), `fullSignatures`, `hotSignatures`, `pinnedSignatures`, `metaToolStyle` (`standard` / `slim`), `signatureStyle` (`full` / `oneline`), `alsoStyle` (`summary` / `name`) |
 | `gateway.results` | `inlineTokenLimit` (1500), `previewRows` (10), `maxStringChars` (600), `maxStored` (50), `tsv`, `dropKeys`, `keepKeys`, `writeReceipts`, `dedupe` |

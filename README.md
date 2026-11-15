@@ -10,7 +10,7 @@ One MCP server for your agent, every MCP server behind it, at a fraction of the 
 ![node](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)
 ![typescript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)
 ![mcp sdk](https://img.shields.io/badge/MCP%20SDK-1.32-6b4bc4)
-![tests](https://img.shields.io/badge/tests-67%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-72%20passing-2ea44f)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
 ```bash
@@ -187,11 +187,17 @@ Then add your own MCP servers under `mcpServers`, in the same shape as in any MC
 export GITHUB_PERSONAL_ACCESS_TOKEN=ghp_...   # optional for public repos (PowerShell: $env:GITHUB_PERSONAL_ACCESS_TOKEN="...")
 ```
 
+Check that every server starts. `check` prints one line per server and exits with code 1 if one failed:
+
+```bash
+npx zak-mcp-gateway check --config config/servers.json
+```
+
 Add `.zak-gateway/` (the local token-savings log) to your `.gitignore`. A `servers.json` that only holds `${VAR}` references is safe to commit, so your team shares one setup.
 
-### 3. Connect your agent (Claude Code, Claude Desktop, Cursor, ...)
+### 3. Connect your agent (Claude Code, Claude Desktop, Cursor, Antigravity, ...)
 
-Register **only the gateway**, and remove the entries for the servers it now fronts. For Claude Code that is the project's `.mcp.json`; Claude Desktop and Cursor use the same `mcpServers` shape:
+Register **only the gateway**, and remove the entries for the servers it now fronts. For Claude Code that is the project's `.mcp.json`. Claude Desktop, Cursor (`.cursor/mcp.json`) and Antigravity use the same `mcpServers` shape. Antigravity's file is the global `~/.gemini/config/mcp_config.json`, which you open from the agent panel's ⋯ → MCP Servers menu, so give the entry a per-project name there.
 
 ```json
 {
@@ -254,12 +260,14 @@ To run a local clone from an agent, point the entry at it: `"command": "node", "
 ```text
 zak-mcp-gateway [--config <servers.json>] [--passthrough]
 zak-mcp-gateway init [--config <servers.json>] [--force]
+zak-mcp-gateway check [--config <servers.json>]
 zak-mcp-gateway report [--config <servers.json> | --log <stats.jsonl>] [--session <id>]
 zak-mcp-gateway --version | --help
 
   --config        config file (default: ./config/servers.json)
   --passthrough   expose every downstream tool raw (baseline for A/B measurement)
   init            write a starter config and print how to connect your agent
+  check           start every server once, print what connected, then exit (code 1 if one failed)
   report          summarize token savings from the stats log
 ```
 
@@ -270,9 +278,10 @@ zak-mcp-gateway --version | --help
 To use it, copy the folder into `.claude/skills/` (Claude Code; `~/.claude/skills/` for all projects) or `.agents/skills/` (Antigravity).
 
 [BENCHMARK.md](skills/zak-mcp-gateway/BENCHMARK.md) has the measured numbers on public servers:
-- 94.4% fewer reply tokens on five tasks;
+- 94.5% fewer reply tokens on five tasks;
 - 6,399 → 599 tokens of tool definitions per request, on hosts that send every schema;
-- a live Claude Code run: tool reply 8,360 → 112 tokens, reported cost $0.209 → $0.126.
+- a live Claude Code run: tool reply 8,360 → 112 tokens, reported cost $0.209 → $0.126;
+- a server that needs 40 s to start: gateway 0.4.1 timed out in Claude Code, 0.4.2 connects and answers.
 
 | Command | What it does |
 |---|---|
@@ -333,6 +342,7 @@ Full example: [`config/servers.example.json`](config/servers.example.json).
 | `pinned` | Also expose this server's tools directly (full schemas, every request; use sparingly) |
 | `safety.confirmWrites` | Write tools need `confirm: true`, sent after the user agrees |
 | `stats.sessionTokenBudget` | Results get half the room at 80%; calls stop at 100% |
+| `startupWaitMs` *(0.4.2)* | Longest wait (ms, default 15000) for the servers before answering the agent's handshake; slower servers keep connecting and calls to them wait for them. `0` = wait for all |
 | `results` *(per server)* | `inlineTokenLimit`, `maxStringChars`, `distill: full \| light \| off`, `writeReceipts` |
 | `synonyms`, `defaultArgs`, `forwardInstructions` | Per-server search vocabulary, injected default arguments, forwarding of the server's own instructions |
 | `access`, `writeIf`, `cache`, `cacheTtlSeconds`, `cacheGroup` | Per-tool read/write overrides, argument-based writes, per-server cache control and shared invalidation |
@@ -369,7 +379,7 @@ Tools are classed **read** or **write** from MCP `readOnlyHint` annotations firs
 
 | Command | What it does |
 |---|---|
-| `npm test` | Build + 67 unit, integration and feature tests (full MCP round trips against a mock server, CLI `init`/`--version`) |
+| `npm test` | Build + 72 unit, integration and feature tests (full MCP round trips against a mock server, slow-server start-up, CLI `init`/`check`/`--version`) |
 | `npm run test:github` | Live check through the real CLI over stdio against the GitHub MCP server (no token needed for public repos) |
 | `npm run bench:github` | Live A/B token benchmark: passthrough vs gateway (`GITHUB_REPO=owner/name` to change the repo) |
 | `npm run bench:compare -- <dir> [--only tuned]` | Live benchmark: no gateway vs an older build (`<dir>` = its `dist`) vs this build (defaults and tuned) |
@@ -450,7 +460,8 @@ Each version has a short release note (what is new, what was fixed, what was mea
 
 | Version | Date | Theme | Highlights | Release note |
 |---|---|---|---|---|
-| **0.4.1** | 11 Nov 2026 | Published on npm | `npm install zak-mcp-gateway` for any project; `init` writes a starter config and prints the agent entry (Windows-aware); `--version`; library exports with TypeScript types for `import` and `require`; minimum dependency versions raised to the tested ones (MCP SDK 1.32). Token behaviour unchanged from 0.4.0. | [v0.4.1](docs/versions/ZAK_Gateway_v0.4.1.pdf) |
+| **0.4.2** | 15 Nov 2026 | Robust start-up | Answers the agent's handshake within `startupWaitMs` (15 s) while slow servers keep connecting; calls wait only for the server they need; `check` command; `init` adds GitHub default fields and noise keys; exits when the agent disconnects, even during start-up; no child process left behind on close. Live: a 40 s server made 0.4.1 time out in Claude Code, 0.4.2 connects and answers. | [v0.4.2](docs/versions/ZAK_Gateway_v0.4.2.pdf) |
+| 0.4.1 | 11 Nov 2026 | Published on npm | `npm install zak-mcp-gateway` for any project; `init` writes a starter config and prints the agent entry (Windows-aware); `--version`; library exports with TypeScript types for `import` and `require`; minimum dependency versions raised to the tested ones (MCP SDK 1.32). Token behaviour unchanged from 0.4.0. | [v0.4.1](docs/versions/ZAK_Gateway_v0.4.1.pdf) |
 | 0.4.0 | 6 Oct 2026 | Fewer turns, cheaper turns | Pinned signatures, workflow tools + suggestions, slim meta-tools, lean search replies, name-aware search ranking, multi-table replies. Fixes: workflow output trimming, search ranking. GitHub: −42% vs v0.3 (searching vs pinned). | [v0.4](docs/versions/ZAK_Gateway_v0.4.pdf) |
 | 0.3.0 | 5 Oct 2026 | Economy upgrade | Per-server modes, compact search, catalog modes, hot signatures, batch, default args, aggregation, safe cache, receipts, `$ref` + patch, rules + skills, elicitation/sampling, sandboxed code mode; agent-UI helpers. Lean: −58% / −49%. | [v0.3](docs/versions/ZAK_Gateway_v0.3.pdf) |
 | 0.2.0 | 4 Oct 2026 | Build-plan upgrade | Handles, noise removal + TSV, safety policy, stats + report + budget, argument repair, remote servers, `${VAR}` secrets, passthrough A/B; many v0.1 bugs fixed. GitHub: −93%. | [v0.2](docs/versions/ZAK_Gateway_v0.2.pdf) |

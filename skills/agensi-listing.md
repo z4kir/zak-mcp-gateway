@@ -24,11 +24,11 @@ mcp, model-context-protocol, mcp-gateway, token-optimization, cost-reduction, cl
 
 ## Compatible agents
 
-Claude Code (tested), Cursor and Google Antigravity (setup written from their documentation), and other agents that support SKILL.md skills and MCP servers.
+Claude Code (tested end to end), Google Antigravity and Cursor (setup written from their documentation), and other agents that support SKILL.md skills and MCP servers.
 
 ## Version
 
-1.0.0 (for zak-mcp-gateway 0.4.1)
+1.0.0 (for zak-mcp-gateway 0.4.2 or newer)
 
 ## Description
 
@@ -36,22 +36,24 @@ Every MCP server you connect sends its full tool schemas with every model reques
 
 **What your agent learns**
 - **When it helps, and when it doesn't.** It helps with two or more servers, large servers such as GitHub, and long JSON results. It doesn't help with a single tiny server.
-- **Setup in a few commands:** `npm install --save-dev zak-mcp-gateway`, `npx zak-mcp-gateway init`, move your servers into one config with secrets as `${VAR}`, and register only the gateway in Claude Code (`.mcp.json`), Cursor (`.cursor/mcp.json`) or Antigravity (`mcp_config.json`). The Windows forms are included.
+- **Setup in a few commands:** `npm install --save-dev zak-mcp-gateway`, `npx zak-mcp-gateway init`, move your servers into one config with secrets as `${VAR}`, verify them with `npx zak-mcp-gateway check`, and register only the gateway in Claude Code (`.mcp.json`), Cursor (`.cursor/mcp.json`) or Antigravity (`mcp_config.json`). The Windows forms are included.
 - **Usage rules that save tokens:** call tools by name, request only the fields you need, page and filter big results by handle instead of re-running tools, batch reads, and pass stored data between calls with `$ref`.
 - **Safety:** write tools run only after you approve them, servers can be made read-only or limited with allow/deny lists, and instruction-like text in tool results is flagged as data.
 - **Troubleshooting:** the gateway's real error messages, each with its fix.
 
-**Measured on public MCP servers** (GitHub + filesystem, 40 tools, 5 read-only tasks, o200k tokenizer, full method and limits in BENCHMARK.md):
+**Measured on public MCP servers** (GitHub + filesystem, 40 tools, 5 read-only tasks, o200k tokenizer, gateway 0.4.2; full method and limits in BENCHMARK.md):
 
 | | Without gateway | With gateway |
 |---|---:|---:|
 | Tool definitions per model request | 6,399 tokens | 599 tokens (−90.6%) |
-| Tool replies, 5 tasks | 78,157 tokens | 4,354 tokens (−94.4%) |
-| Whole agent run (replayed) | 337,903 input tokens | 20,029 input tokens (−94.1%) |
+| Tool replies, 5 tasks | 79,507 tokens | 4,369 tokens (−94.5%) |
+| Whole agent run (replayed) | 342,352 input tokens | 20,104 input tokens (−94.1%) |
 
-Every gateway reply still contained the answer to its task. The tool-definition saving applies to hosts that send every schema with each request.
+Every gateway reply still contained the answer to its task. The tool-definition saving applies to hosts that send every schema with each request, such as Antigravity.
 
 **Live in Claude Code 2.1** (one question, run once each way): the same correct answer, the tool reply went from 8,360 to 112 tokens, new input tokens fell 47.6%, and the cost Claude Code reported went from $0.209 to $0.126. Claude Code already loads MCP tool schemas on demand, so there the gain comes from the smaller results.
+
+**Robust start-up:** the gateway waits at most 15 seconds for the servers behind it before answering the agent, and slower servers keep starting in the background. A server that needed 40 seconds made the previous version time out in Claude Code; 0.4.2 connects and answers.
 
 **What's in the package:** `SKILL.md` (instructions), `references/configuration.md` (recipes and every config key), `BENCHMARK.md` (numbers, method, limits) and `README.md`. Text files only.
 

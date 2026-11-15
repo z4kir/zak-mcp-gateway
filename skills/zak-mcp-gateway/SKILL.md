@@ -91,7 +91,7 @@ Replace the direct entries for every server the gateway now fronts with this sin
 |---|---|
 | Claude Code | `.mcp.json` in the project root. Claude Code treats this file as sensitive and asks the user to approve the edit. If your write is refused, show the user the exact file content to create. Do not try to get around the block. |
 | Cursor | `.cursor/mcp.json` in the project, or `~/.cursor/mcp.json` for all projects. |
-| Antigravity | Its `mcp_config.json`. The location depends on the Antigravity version, so ask the user to open it in the Agent panel: **⋯ → MCP Servers → Manage MCP Servers → View raw config**. This file usually applies to every project, so name the entry per project (for example `zak-gateway-myapp`). Restart Antigravity after saving. |
+| Antigravity | The global `~/.gemini/config/mcp_config.json` (older versions: `~/.gemini/antigravity/mcp_config.json`). The user can open it from the agent panel's **⋯ → MCP Servers** menu. It applies to every project, so name the entry per project (for example `zak-gateway-myapp`), keep the absolute `--config` path, and restart Antigravity after saving. |
 
 All three use the same `mcpServers` format:
 
@@ -127,11 +127,11 @@ Native Windows (not WSL): start `npx` through `cmd /c`:
 
 ### Step 5: check it, then restart the agent
 
-1. Check the gateway starts. It waits for an MCP client, so start it with your shell's background-command feature (or a time limit), wait about 30 seconds, read its output, then stop it. The first start downloads the servers, so this also makes the agent's later starts faster.
+1. Check every server starts. `check` starts each server once, prints the result and exits (code 1 if a server failed):
    ```bash
-   npx zak-mcp-gateway --config /absolute/path/to/project/config/servers.json
+   npx zak-mcp-gateway check --config /absolute/path/to/project/config/servers.json
    ```
-   Within a few seconds stderr shows one line per server, such as `[zak-gateway] INFO [pool] github: 26 tools`, then `... downstream tools. Tool definitions: ~N tokens direct vs ~M via gateway`. A server that fails is logged as `[pool] <id>: failed to connect: ...`, and the others keep working.
+   It prints one line per server, such as `github  ok, 26 tools` or `<id>  FAILED: <reason>`, then `Tool definitions per model request: ~N tokens direct vs ~M via the gateway`. The first run downloads servers started with `npx`, which also makes the agent's later starts faster. Fix any FAILED server before continuing; the others still work without it.
 2. Add `.zak-gateway/` (the local savings log) to `.gitignore`.
 3. Tell the user to restart the agent or reload its MCP servers. Claude Code asks once to approve a new project server from `.mcp.json`. Until then, `claude mcp list` shows it as `Pending approval`.
 4. After the restart the agent has `mcp_search_tools`, `mcp_call_tool` and `mcp_get_result` (plus `mcp_run_code` if code mode is on). The individual servers' tools are no longer listed directly.
@@ -162,12 +162,12 @@ Follow these rules whenever the gateway's tools are available.
 |---|---|
 | The agent shows no gateway tools, or the server fails to start on Windows | Use the `cmd /c npx ...` or `node .../dist/cli.js` form from step 4, check the JSON is valid, restart the agent, and approve the server if asked. |
 | Claude Code: `claude mcp list` shows `Pending approval` | Open `claude` in the project and approve `zak-gateway`. |
-| Claude Code: the gateway times out while starting | The gateway answers only after every server behind it has started, and Claude Code waits 30 seconds by default. Run the start check from step 5 first, which downloads and caches the servers. Use the `node .../dist/cli.js` form. If it still times out, start Claude Code with the `MCP_TIMEOUT` environment variable set higher, for example `60000`. |
+| The gateway times out while the agent starts it | The gateway answers the agent within 15 seconds (`gateway.startupWaitMs`), and slower servers keep connecting in the background. Their tools are then usable, and the instructions list them as `Still starting`. If the host still times out, the gateway itself is slow to launch: use the `node .../dist/cli.js` form and run `check` once to fill the `npx` cache. In Claude Code you can also set the `MCP_TIMEOUT` environment variable higher, for example `60000`. |
 | Antigravity: a `${VAR}` stays unset even though it is in the entry's `env` | Some Antigravity versions were reported not to pass `env`. Ask the user to set the variable in their system environment, then restart Antigravity. The gateway inherits it from there. |
 | `[config] .../config/servers.json not found; starting with no downstream servers.` | The host started the gateway in another folder. Pass an absolute `--config` path. |
 | `Failed to read config <path>` | The `--config` path is wrong. Fix the path. |
 | `Invalid config <path>: <key>: <message>` | Fix the named key in `servers.json`. |
-| `[pool] <id>: failed to connect: ...` | That server's `command`, `args`, `env` or `url` is wrong. Run its command on its own to see the error. |
+| `check` shows `<id>  FAILED: ...`, or the log shows `[pool] <id>: failed to connect: ...` | That server's `command`, `args`, `env` or `url` is wrong. Run its command on its own to see the error. |
 | `[config] <id>.env.<VAR> references an unset environment variable; skipped.` | Ask the user to set `VAR` in their shell or in the agent's MCP `env`, then restart. |
 | `[config] <id>.env.<KEY> looks like a hard-coded secret.` | Replace the literal value with `${KEY}` and set it in the environment. |
 | `Tool "x" not found. Did you mean: ...?` | Use the suggested `server__tool` name, or `mcp_search_tools`. |

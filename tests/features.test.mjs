@@ -607,3 +607,102 @@ test("v0.4.1 --version prints the package version; the example config is valid",
   const example = await loadConfig("config/servers.example.json");
   assert.equal(example.gateway.version, pkg.version, "example config tracks the package version");
 });
+
+// ============================== v0.4.2: start-up and CLI ==============================
+
+/** Writes a gateway config into a temp folder and returns its path. */
+async function tempConfig(mcpServers, gateway = {}) {
+  const path = await import("node:path");
+  const os = await import("node:os");
+  const { mockServerPath } = await import("./helpers.mjs");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zak-042-"));
+  const servers = Object.fromEntries(Object.entries(mcpServers).map(([id, s]) => [id, s === "mock" ? { command: "node", args: [mockServerPath] } : s]));
+  const file = path.join(dir, "servers.json");
+  fs.writeFileSync(file, JSON.stringify({ gateway: { stats: { enabled: false }, ...gateway }, mcpServers: servers }));
+  return { dir, file };
+}
+
+test("v0.4.2 slow server: the handshake is answered within startupWaitMs, its tools work once it is up", async t => {
+  const { mockServerPath } = await import("./helpers.mjs");
+  const started = Date.now();
+  const g = await startGateway({
+    gateway: { startupWaitMs: 2000 },
+    extraServers: { slow: { command: "node", args: [mockServerPath], env: { MOCK_START_DELAY_MS: "6000" } } }
+  });
+  t.after(g.close);
+  const handshakeMs = Date.now() - started;
+  assert.ok(handshakeMs < 5000, `handshake took ${handshakeMs} ms; it must not wait for the slow server`);
+  const instructions = g.gateway.getInstructions();
+  assert.match(instructions, /Still starting: slow\./, "the agent is told which server is still starting");
+  assert.match(instructions, /mock_read_db/, "the fast server is already in the catalog");
+
+  const r = await g.call("mcp_call_tool", { tool_name: "slow__mock_read_db", arguments: { table: "u", perPage: 2 } });
+  assert.ok(!r.isError, r.text);
+  assert.match(r.text, /User 1/, "a call to the slow server waits for it, then runs");
+  const s = await g.call("mcp_search_tools", { query: "read rows from the database", limit: 5 });
+  assert.match(s.text, /slow__mock_read_db/, "the slow server's tools are searchable once it is up");
+  assert.equal(g.gateway.schemaTokens().tools, 16, "the session totals count both servers");
+});
+
+test("v0.4.2 a call to a ready server does not wait for a slow one", async t => {
+  const { mockServerPath } = await import("./helpers.mjs");
+  const g = await startGateway({
+    gateway: { startupWaitMs: 2000 },
+    extraServers: { slow: { command: "node", args: [mockServerPath], env: { MOCK_START_DELAY_MS: "8000" } } }
+  });
+  t.after(g.close);
+  const before = Date.now();
+  const r = await g.call("mcp_call_tool", { tool_name: "testdb__mock_read_db", arguments: { table: "u", perPage: 1 } });
+  assert.ok(!r.isError, r.text);
+  assert.ok(Date.now() - before < 2000, "answered without waiting for the slow server");
+});
+
+test("v0.4.2 serve exits when the agent closes stdin, also before start-up has finished", async () => {
+  const { spawn } = await import("node:child_process");
+  const { file } = await tempConfig({ testdb: "mock" });
+  const exits = child => new Promise(resolve => {
+    const timer = setTimeout(() => { child.kill(); resolve("still running"); }, 20000);
+    child.on("exit", code => { clearTimeout(timer); resolve(code); });
+  });
+
+  // Normal disconnect: stdin closes after the gateway is up.
+  const a = spawn(process.execPath, ["dist/cli.js", "--config", file], { stdio: ["pipe", "pipe", "pipe"] });
+  await new Promise(resolve => a.stderr.on("data", d => { if (String(d).includes("downstream tools")) resolve(); }));
+  a.stdin.end();
+  assert.equal(await exits(a), 0, "exits after a normal disconnect");
+
+  // stdin already closed while the downstream servers are still starting.
+  const b = spawn(process.execPath, ["dist/cli.js", "--config", file], { stdio: ["ignore", "pipe", "pipe"] });
+  assert.equal(await exits(b), 0, "exits instead of hanging when started without a client");
+});
+
+test("v0.4.2 check: prints every server's outcome and exits 1 when one fails", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const good = await tempConfig({ testdb: "mock" });
+  const ok = spawnSync(process.execPath, ["dist/cli.js", "check", "--config", good.file], { encoding: "utf-8" });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /testdb\s+ok, 8 tools/);
+  assert.match(ok.stdout, /Tool definitions per model request: ~\d+ tokens direct vs ~\d+ via the gateway \(8 tools\)/);
+  assert.match(ok.stdout, /Every server connected\./);
+
+  const bad = await tempConfig({ testdb: "mock", broken: { command: "node", args: ["-e", "process.exit(3)"] } });
+  const fail = spawnSync(process.execPath, ["dist/cli.js", "check", "--config", bad.file], { encoding: "utf-8" });
+  assert.equal(fail.status, 1, "a failed server makes check exit 1");
+  assert.match(fail.stdout, /broken\s+FAILED: /);
+  assert.match(fail.stdout, /1 of 2 failed\./);
+});
+
+test("v0.4.2 init adds the GitHub noise keys and default fields", async () => {
+  const path = await import("node:path");
+  const os = await import("node:os");
+  const { execFileSync } = await import("node:child_process");
+  const { loadConfig } = await import("../dist/index.js");
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), "zak-init-"));
+  const out = execFileSync(process.execPath, [path.resolve("dist/cli.js"), "init"], { cwd: project, encoding: "utf-8" });
+  assert.match(out, /zak-mcp-gateway check --config config\/servers\.json/, "init points at the check command");
+  const example = JSON.parse(fs.readFileSync("config/servers.example.json", "utf-8")).mcpServers.github;
+  const github = (await loadConfig(path.join(project, "config", "servers.json"))).mcpServers.github;
+  assert.deepEqual(github.dropKeys, example.dropKeys, "same noise keys as the example config");
+  assert.deepEqual(github.projections, example.projections, "same default fields as the example config");
+  fs.rmSync(project, { recursive: true, force: true });
+});
