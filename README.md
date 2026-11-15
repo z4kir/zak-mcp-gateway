@@ -263,6 +263,22 @@ zak-mcp-gateway --version | --help
   report          summarize token savings from the stats log
 ```
 
+### Agent skill
+
+[`skills/zak-mcp-gateway/`](skills/zak-mcp-gateway) is a `SKILL.md` skill for Claude Code, Cursor, Google Antigravity and other agents that support skills. It teaches the agent to set up the gateway in a project and to work through it (call by name, `project_fields`, handles, confirmed writes).
+
+To use it, copy the folder into `.claude/skills/` (Claude Code; `~/.claude/skills/` for all projects) or `.agents/skills/` (Antigravity).
+
+[BENCHMARK.md](skills/zak-mcp-gateway/BENCHMARK.md) has the measured numbers on public servers:
+- 94.4% fewer reply tokens on five tasks;
+- 6,399 → 599 tokens of tool definitions per request, on hosts that send every schema;
+- a live Claude Code run: tool reply 8,360 → 112 tokens, reported cost $0.209 → $0.126.
+
+| Command | What it does |
+|---|---|
+| `npm run pack:skill` | Checks the skill against marketplace rules and builds `skills/dist/zak-mcp-gateway.zip` |
+| `npm run bench:skill -- --project <folder>` | Re-runs the benchmark in a folder set up by following the skill |
+
 ## 🧰 What the agent sees
 
 | Tool | Arguments | Purpose |
@@ -398,6 +414,7 @@ zak-mcp-gateway/
 │   ├── server/                       # meta-tools + MCP server
 │   └── util/                         # token estimator, logger, glob
 ├── tests/                            # unit, integration, live GitHub test, benchmarks, fixtures
+├── skills/zak-mcp-gateway/           # agent skill (SKILL.md, config reference, benchmark); skills/pack.mjs zips it
 ├── agent-ui/                         # Next.js + Gemini A/B harness
 ├── config/servers.example.json
 └── docs/                             # PDFs (HTML sources in docs/src)

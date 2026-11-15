@@ -31,6 +31,8 @@
     "bench:github": "node tests/benchmark-github.mjs",
     "report": "node dist/cli.js report",
     "bench:compare": "node tests/benchmark-compare.mjs --prev",
+    "bench:skill": "node tests/benchmark-skill.mjs",
+    "pack:skill": "node skills/pack.mjs zak-mcp-gateway",
     "prepublishOnly": "npm test",
     "prepack": "npm run clean && npm run build"
   },
