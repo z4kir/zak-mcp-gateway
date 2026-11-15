@@ -162,6 +162,34 @@ const VERSIONS = [
       "Known: npm audit reports zod below 4.6.6 (memory use on oversized collections). zod only checks the local config file here and messages inside the MCP SDK; the fix needs zod 4, whose default handling changes the config schema, so it is planned as its own change.",
       "Register only the gateway with an agent, with an absolute --config path."
     ]
+  },
+  {
+    version: "0.4.2",
+    date: "15 Nov 2026",
+    theme: "Robust start-up",
+    summary: "Fixes found by testing the new agent skill in Claude Code: a slow server no longer makes the agent drop the gateway, and setup gets a check command. No change to how tokens are saved.",
+    analogy: "The concierge opens the desk on time even if one back office is still unlocking its door; requests for that office simply wait for it.",
+    added: [
+      ["Answer on time", "The gateway waits at most startupWaitMs (15 s) for the servers before answering the agent's handshake. Slower servers keep connecting in the background, the instructions name them as still starting, and calls wait only for the server they need.", "gateway.startupWaitMs"],
+      ["check command", "Starts every server once, prints one line per server (ok with its tool count, or FAILED with the reason) and the tool-definition tokens, then exits with code 1 if a server failed.", "zak-mcp-gateway check"],
+      ["Better init defaults", "init adds the GitHub noise keys and default fields from the example config, so big issue lists come back as a readable table instead of one raw row.", "zak-mcp-gateway init"],
+      ["Clean shutdown", "The gateway exits when the agent closes its input, even during start-up, and closing it also stops servers that are still starting.", "built in"],
+      ["Agent skill", "skills/zak-mcp-gateway: SKILL.md for Claude Code, Cursor and Antigravity, with a configuration reference and a benchmark; skills/pack.mjs builds the marketplace zip.", "skills/"]
+    ],
+    fixed: [
+      ["A server slower than the host's start-up limit (30 s in Claude Code) made the whole gateway time out", "The handshake is answered after 15 s; the slow server connects later"],
+      ["Started with no client attached, the gateway kept running", "It exits when its input closes"],
+      ["Closing the gateway while a server was still starting left that server's process running", "Servers still starting are stopped on close"]
+    ],
+    measured: [
+      ["Claude Code 2.1, GitHub plus a server that needs 40 s to start", "0.4.1 timed out after 30 s with no tools; 0.4.2 connected and answered correctly"],
+      ["Skill benchmark, 5 tasks on public GitHub + filesystem servers", "tool definitions 6,399 to 599 tokens per request; replies 79,507 to 4,369 tokens (-94.5%)"],
+      ["Tests", "72 of 72 pass (5 new: slow server, per-server wait, shutdown, check, init defaults)"]
+    ],
+    notes: [
+      "Set gateway.startupWaitMs to 0 to wait for every server, as before.",
+      "Run zak-mcp-gateway check once after changing servers.json; it also fills the npx cache, so the agent's starts are faster."
+    ]
   }
 ];
 

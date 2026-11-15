@@ -125,4 +125,7 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
   throw new Error(`Tool not found: ${name}`);
 });
 
+// MOCK_START_DELAY_MS simulates a slow server (for example a first npx download).
+const startDelay = Number(process.env.MOCK_START_DELAY_MS ?? 0);
+if (startDelay > 0) await new Promise(r => setTimeout(r, startDelay));
 await server.connect(new StdioServerTransport());

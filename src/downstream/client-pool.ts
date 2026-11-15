@@ -38,21 +38,64 @@ export class DownstreamClientPool {
   private configs: Record<string, DownstreamServerConfig> = {};
   private serverInstructions = new Map<string, string>();
 
-  public async initializeServers(servers: Record<string, Partial<DownstreamServerConfig>>): Promise<DownstreamTool[]> {
-    const entries = Object.entries(servers);
-    const results = await Promise.allSettled(entries.map(([id, cfg]) => this.connectServer(id, cfg)));
+  /** Servers still connecting, each with a promise that settles when it is up or has failed. */
+  private pending = new Map<string, Promise<void>>();
+  /** Clients whose transport is being connected (their child process may already run). */
+  private connecting = new Map<string, Client>();
+  private closed = false;
+  private status = new Map<string, { tools?: number; error?: string }>();
 
+  /**
+   * Connects every server in parallel. `onReady` runs as soon as each server is up, so its
+   * tools can be used before slower servers finish. Resolves with all tools once every
+   * server has connected or failed.
+   */
+  public async initializeServers(
+    servers: Record<string, Partial<DownstreamServerConfig>>,
+    onReady?: (serverId: string, tools: DownstreamTool[]) => void
+  ): Promise<DownstreamTool[]> {
+    const entries = Object.entries(servers);
     const discovered: DownstreamTool[] = [];
-    results.forEach((res, i) => {
-      const [serverId] = entries[i];
-      if (res.status === "fulfilled") {
-        discovered.push(...res.value);
-        log.info(`[pool] ${serverId}: ${res.value.length} tools`);
-      } else {
-        log.error(`[pool] ${serverId}: failed to connect: ${(res.reason as Error)?.message ?? res.reason}`);
-      }
-    });
+    await Promise.all(
+      entries.map(([serverId, cfg]) => {
+        const done = this.connectServer(serverId, cfg).then(
+          tools => {
+            discovered.push(...tools);
+            this.status.set(serverId, { tools: tools.length });
+            log.info(`[pool] ${serverId}: ${tools.length} tools`);
+            try {
+              onReady?.(serverId, tools);
+            } catch (err) {
+              log.error(`[pool] ${serverId}: registering tools failed: ${(err as Error).message}`);
+            }
+          },
+          err => {
+            const message = (err as Error)?.message ?? String(err);
+            this.status.set(serverId, { error: message });
+            if (!this.closed) log.error(`[pool] ${serverId}: failed to connect: ${message}`);
+          }
+        ).finally(() => this.pending.delete(serverId));
+        this.pending.set(serverId, done);
+        return done;
+      })
+    );
     return discovered;
+  }
+
+  /** Ids of servers that are still connecting. */
+  public pendingServers(): string[] {
+    return [...this.pending.keys()];
+  }
+
+  /** Waits until this server has connected or failed (no-op if it is not starting). */
+  public async whenSettled(serverId: string): Promise<void> {
+    await this.pending.get(serverId);
+  }
+
+  /** Per-server outcome: tool count when connected, error message when it failed. */
+  public serverStatus(): Array<{ serverId: string; tools?: number; error?: string; pending?: boolean }> {
+    const ids = new Set([...Object.keys(this.configs), ...this.status.keys()]);
+    return [...ids].map(serverId => ({ serverId, ...this.status.get(serverId), ...(this.pending.has(serverId) ? { pending: true } : {}) }));
   }
 
   private async connectServer(serverId: string, partial: Partial<DownstreamServerConfig>): Promise<DownstreamTool[]> {
@@ -77,11 +120,19 @@ export class DownstreamClientPool {
     }
     const timeoutMs = config.connectTimeoutMs ?? 60_000;
 
+    this.connecting.set(serverId, client);
     try {
       await withTimeout(this.connectTransport(serverId, config, client), timeoutMs, `connect timed out after ${timeoutMs}ms`);
     } catch (err) {
       await client.close().catch(() => undefined); // don't leave a half-started child process behind
       throw err;
+    } finally {
+      this.connecting.delete(serverId);
+    }
+    if (this.closed) {
+      // The gateway was closed while this server was still starting: stop it again.
+      await client.close().catch(() => undefined);
+      throw new Error("the gateway closed while this server was starting");
     }
     this.clients.set(serverId, client);
     const instructions = client.getInstructions();
@@ -184,9 +235,11 @@ export class DownstreamClientPool {
     return [...this.tools.values()];
   }
 
+  /** Closes every connected server and stops the ones still starting (no child process is left behind). */
   public async closeAll(): Promise<void> {
+    this.closed = true;
     await Promise.allSettled(
-      [...this.clients.entries()].map(async ([id, client]) => {
+      [...this.clients.entries(), ...this.connecting.entries()].map(async ([id, client]) => {
         try {
           await client.close();
         } catch (err) {

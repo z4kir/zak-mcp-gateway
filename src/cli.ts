@@ -8,13 +8,28 @@ import { suggestWorkflows } from "./stats/suggestions.js";
 
 const USAGE = `zak-mcp-gateway [--config <servers.json>] [--passthrough]
 zak-mcp-gateway init [--config <servers.json>] [--force]
+zak-mcp-gateway check [--config <servers.json>]
 zak-mcp-gateway report [--config <servers.json> | --log <stats.jsonl>] [--session <id>]
 zak-mcp-gateway --version | --help
 
   --config        config file (default: ./config/servers.json)
   --passthrough   expose every downstream tool raw (baseline for A/B measurement)
   init            write a starter config and print how to connect your agent
+  check           start every server once, print what connected, then exit (code 1 if one failed)
   report          summarize token savings from the stats log`;
+
+/** GitHub MCP noise keys and default fields; the same as in config/servers.example.json. */
+const GITHUB_DROP_KEYS = [
+  "url", "permissions", "reactions", "performed_via_github_app", "author_association",
+  "site_admin", "user_view_type", "verification", "sub_issues_summary"
+];
+const GITHUB_PROJECTIONS = {
+  list_commits: ["sha", "commit.message", "commit.author.name", "commit.author.date", "html_url"],
+  list_issues: [
+    "number", "title", "state", "user.login", "labels.name", "comments",
+    "created_at", "updated_at", "html_url", "pull_request.html_url"
+  ]
+};
 
 /** Package folder (dist/..): the same from a git clone and from node_modules. */
 const PACKAGE_ROOT = path.resolve(__dirname, "..");
@@ -48,7 +63,9 @@ async function init(args: string[]): Promise<void> {
       github: {
         command: "npx",
         args: ["-y", "@modelcontextprotocol/server-github"],
-        env: { GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_PERSONAL_ACCESS_TOKEN}" }
+        env: { GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_PERSONAL_ACCESS_TOKEN}" },
+        dropKeys: GITHUB_DROP_KEYS,
+        projections: GITHUB_PROJECTIONS
       }
     }
   };
@@ -78,22 +95,58 @@ Next:
   2. Register only the gateway with your agent (.mcp.json for Claude Code, claude_desktop_config.json,
      .cursor/mcp.json, ...) and remove the direct entries for the servers it now fronts:
 ${snippet}
-  3. Add .zak-gateway/ to .gitignore (local token-savings log).
+  3. Check that every server starts: npx zak-mcp-gateway check --config ${toSlashes(relTarget)}
+  4. Add .zak-gateway/ to .gitignore (local token-savings log).
      See the savings later with: npx zak-mcp-gateway report --config ${toSlashes(relTarget)}`);
 }
 
 async function serve(args: string[]): Promise<void> {
   const config = await loadConfig(flag(args, "--config"));
   const server = new GatewayServer(config, { passthrough: args.includes("--passthrough") });
-  await server.start();
 
+  let closing = false;
   const shutdown = async () => {
+    if (closing) return;
+    closing = true;
     await server.close().catch(() => undefined);
     process.exit(0);
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+  // The agent closes stdin when it disconnects. Listen before starting: stdin can end while the
+  // downstream servers are still starting, and a missed event would leave the gateway running.
+  process.stdin.on("end", shutdown);
   process.stdin.on("close", shutdown);
+
+  await server.start();
+  if (process.stdin.readableEnded || process.stdin.destroyed) await shutdown();
+}
+
+/** Start every server once (no time limit), print what connected, exit 1 if any failed. */
+async function check(args: string[]): Promise<void> {
+  const configPath = flag(args, "--config");
+  const config = await loadConfig(configPath);
+  config.gateway.startupWaitMs = 0; // wait for every server, however slow
+  config.gateway.stats.enabled = false; // a check is not an agent session
+  const gateway = new GatewayServer(config);
+  const started = Date.now();
+  await gateway.initialize();
+  await gateway.whenDownstreamReady();
+  const status = gateway.pool.serverStatus();
+  const failed = status.filter(s => s.error !== undefined);
+  const width = Math.max(6, ...status.map(s => s.serverId.length));
+
+  console.log(`Config: ${path.resolve(process.cwd(), configPath ?? path.join("config", "servers.json"))}`);
+  if (status.length === 0) console.log("  (no servers configured)");
+  for (const s of status) {
+    console.log(`  ${s.serverId.padEnd(width)}  ${s.error !== undefined ? `FAILED: ${s.error}` : `ok, ${s.tools} tools`}`);
+  }
+  const t = gateway.schemaTokens();
+  console.log(`Tool definitions per model request: ~${t.direct} tokens direct vs ~${t.gateway} via the gateway (${t.tools} tools)`);
+  console.log(`Finished in ${((Date.now() - started) / 1000).toFixed(1)} s. ` +
+    (failed.length ? `${failed.length} of ${status.length} failed.` : "Every server connected."));
+  await gateway.close().catch(() => undefined);
+  process.exit(failed.length ? 1 : 0);
 }
 
 async function report(args: string[]): Promise<void> {
@@ -192,6 +245,7 @@ async function main() {
     return;
   }
   if (args[0] === "init") return init(args.slice(1));
+  if (args[0] === "check") return check(args.slice(1));
   if (args[0] === "report") return report(args.slice(1));
   return serve(args);
 }

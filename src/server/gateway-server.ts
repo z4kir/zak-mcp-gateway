@@ -9,7 +9,7 @@ import {
   Tool
 } from "@modelcontextprotocol/sdk/types.js";
 import { ValidatedGatewayConfig } from "../config/schema.js";
-import { DownstreamClientPool } from "../downstream/client-pool.js";
+import { DownstreamClientPool, NAMESPACE_SEP } from "../downstream/client-pool.js";
 import { ToolDiscoveryEngine } from "../discovery/search-index.js";
 import { buildCatalog, CatalogMode } from "../discovery/catalog.js";
 import { matchesAny } from "../util/glob.js";
@@ -89,35 +89,102 @@ export class GatewayServer {
     });
   }
 
-  /** Connect downstream servers, build the catalog, and create the upstream MCP server. */
+  /** Settles when every downstream server has connected or failed and setup is complete. */
+  private downstreamReady: Promise<void> = Promise.resolve();
+  private downstreamTools: DownstreamTool[] = [];
+  /** Servers that were still starting when the agent's handshake was answered. */
+  private startingServers: string[] = [];
+
+  /**
+   * Connect downstream servers, build the catalog, and create the upstream MCP server.
+   * Waits at most `gateway.startupWaitMs` for slow servers so the agent's handshake is
+   * answered in time (hosts allow about 30 s). Slower servers keep connecting in the
+   * background: their tools become searchable and callable as soon as they are up.
+   */
   public async initialize(): Promise<void> {
-    const tools = await this.pool.initializeServers(this.config.mcpServers);
     for (const server of Object.values(this.config.mcpServers)) this.discovery.addSynonyms(server.synonyms ?? {});
-    this.discovery.registerTools(tools);
-    if (!this.options.passthrough && Object.keys(this.config.gateway.workflows).length) {
-      this.workflows = new WorkflowRunner(this.config.gateway.workflows, this.dispatcher, name => !!this.pool.resolveTool(name));
-      this.discovery.registerTools(this.workflows.asTools());
+    const all = this.pool.initializeServers(this.config.mcpServers, (_id, tools) => this.discovery.registerTools(tools));
+    this.downstreamReady = all
+      .then(tools => this.finishDownstream(tools))
+      .catch(err => log.error(`[startup] setup after connecting failed: ${(err as Error).message}`));
+
+    const waitMs = this.config.gateway.startupWaitMs;
+    const inTime = waitMs > 0 ? await settlesWithin(this.downstreamReady, waitMs) : (await this.downstreamReady, true);
+    if (!inTime) {
+      this.startingServers = this.pool.pendingServers();
+      log.warn(
+        `[startup] still starting after ${waitMs} ms: ${this.startingServers.join(", ")}. ` +
+          "Answering the agent now; their tools become usable as soon as they connect."
+      );
     }
     this.instructions = this.buildInstructions();
 
     this.server = new Server(
       { name: this.config.gateway.name, version: this.config.gateway.version },
-      { capabilities: { tools: {}, resources: {} }, instructions: this.instructions || undefined }
+      { capabilities: { tools: { listChanged: true }, resources: {} }, instructions: this.instructions || undefined }
     );
     this.setupHandlers(this.server);
 
-    const baselineSchemaTokens = estimateTokens(JSON.stringify({ tools: tools.map(rawToolDefinition) }));
-    const gatewaySchemaTokens = estimateTokens(JSON.stringify({ tools: this.listTools() })) + estimateTokens(this.instructions);
+    const listedAtStart = JSON.stringify(this.listTools());
+    void this.downstreamReady.then(() => {
+      this.recordSession();
+      // Pinned servers and passthrough mode list downstream tools directly: tell the client.
+      if (!inTime && JSON.stringify(this.listTools()) !== listedAtStart) {
+        this.server?.sendToolListChanged().catch(() => undefined);
+      }
+    });
+  }
+
+  /** Runs once every server has connected or failed. */
+  private finishDownstream(tools: DownstreamTool[]): void {
+    this.downstreamTools = tools;
+    if (!this.options.passthrough && Object.keys(this.config.gateway.workflows).length) {
+      this.workflows = new WorkflowRunner(this.config.gateway.workflows, this.dispatcher, name => !!this.pool.resolveTool(name));
+      this.discovery.registerTools(this.workflows.asTools());
+    }
+  }
+
+  /** Tokens of the tool definitions an agent receives: every raw schema vs the gateway's list + instructions. */
+  public schemaTokens(): { tools: number; direct: number; gateway: number } {
+    const tools = this.downstreamTools;
+    return {
+      tools: tools.length,
+      direct: estimateTokens(JSON.stringify({ tools: tools.map(rawToolDefinition) })),
+      gateway: estimateTokens(JSON.stringify({ tools: this.listTools() })) + estimateTokens(this.instructions)
+    };
+  }
+
+  private recordSession(): void {
+    const t = this.schemaTokens();
     this.stats.recordSession({
       servers: Object.keys(this.config.mcpServers),
-      toolCount: tools.length,
-      baselineSchemaTokens,
-      gatewaySchemaTokens
+      toolCount: t.tools,
+      baselineSchemaTokens: t.direct,
+      gatewaySchemaTokens: t.gateway
     });
     log.info(
-      `${tools.length} downstream tools. Tool definitions: ~${baselineSchemaTokens} tokens direct vs ~${gatewaySchemaTokens} via gateway` +
+      `${t.tools} downstream tools. Tool definitions: ~${t.direct} tokens direct vs ~${t.gateway} via gateway` +
         (this.options.passthrough ? " (passthrough mode: no optimization)" : "")
     );
+  }
+
+  /** Resolves once every downstream server has connected or failed. */
+  public whenDownstreamReady(): Promise<void> {
+    return this.downstreamReady;
+  }
+
+  /**
+   * Calls that use downstream tools wait for servers that are still starting: a call by name
+   * waits only for its own server, everything else for all of them.
+   */
+  private async awaitStartingServers(name: string, args: Record<string, unknown>): Promise<void> {
+    if (this.pool.pendingServers().length === 0) return;
+    const toolName = name === "mcp_call_tool" && !Array.isArray(args.calls) ? args.tool_name : name;
+    if (typeof toolName === "string") {
+      const serverId = toolName.split(NAMESPACE_SEP)[0];
+      if (serverId !== toolName && serverId in this.config.mcpServers) return this.pool.whenSettled(serverId);
+    }
+    await this.downstreamReady;
   }
 
   public async connect(transport: Transport): Promise<void> {
@@ -173,6 +240,9 @@ export class GatewayServer {
     ];
     const mode: CatalogMode = d.catalog ?? (d.catalogInInstructions ? "names" : "off");
     lines.push(...buildCatalog(this.visibleTools(), mode));
+    if (this.startingServers.length) {
+      lines.push(`Still starting: ${this.startingServers.join(", ")}. Their tools are not listed here yet; mcp_search_tools and mcp_call_tool wait for them.`);
+    }
 
     // Hot signatures: the most-used tools from earlier sessions, so the agent can call them
     // without searching. Computed once at startup, so the instructions stay fixed.
@@ -225,6 +295,7 @@ export class GatewayServer {
   }
 
   public async handleCall(name: string, args: Record<string, unknown>): Promise<ToolResult> {
+    if (name !== "mcp_get_result" && name !== "mcp_get_skill") await this.awaitStartingServers(name, args);
     if (this.options.passthrough) return this.passthroughCall(name, args);
 
     switch (name) {
@@ -463,4 +534,16 @@ function pinnedSchema(t: DownstreamTool, confirmWrites: boolean): Tool["inputSch
     };
   }
   return schema;
+}
+
+/** True if `promise` settles within `ms`, false otherwise. The timer never keeps the process alive. */
+function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => resolve(false), ms);
+    const done = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    promise.then(done, done);
+  });
 }
