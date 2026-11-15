@@ -24,7 +24,7 @@ mcp, model-context-protocol, mcp-gateway, token-optimization, cost-reduction, cl
 
 ## Compatible agents
 
-Claude Code (tested end to end), Google Antigravity and Cursor (setup written from their documentation), and other agents that support SKILL.md skills and MCP servers.
+Claude Code and Google Antigravity (both tested end to end), Cursor (setup written from its documentation), and other agents that support SKILL.md skills and MCP servers.
 
 ## Version
 
@@ -61,7 +61,7 @@ Every gateway reply still contained the answer to its task. The tool-definition 
 
 **Requirements:** Node.js 20+ and npm.
 
-Tested on Windows with Node 22 in two ways. The setup steps were followed literally from an empty folder, with the gateway driven by an MCP client. Claude Code 2.1 was also run end to end. It loaded the skill, did the setup in an empty folder (handing the final `.mcp.json` to the user, because Claude Code protects that file), answered through the gateway, and ran a write through its confirmation step.
+Tested on Windows with Node 22 in two ways. The setup steps were followed literally from an empty folder, with the gateway driven by an MCP client. Claude Code 2.1 was also run end to end. It loaded the skill, did the setup in an empty folder (handing the final `.mcp.json` to the user, because Claude Code protects that file), answered through the gateway, and ran a write through its confirmation step. In Google Antigravity, the agent found the skill in the workspace, set the gateway up, and answered a GitHub question through it once the gateway was registered.
 
 **Source, issues and docs:** https://github.com/z4kir/zak-mcp-gateway · npm: https://www.npmjs.com/package/zak-mcp-gateway
 

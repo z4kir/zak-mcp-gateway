@@ -33,7 +33,7 @@ Measured on the public GitHub and filesystem MCP servers ([BENCHMARK.md](BENCHMA
 ## Requirements
 
 - Node.js 20+ and npm; `zak-mcp-gateway` 0.4.2 or newer (the agent installs the latest).
-- An agent that supports MCP servers and `SKILL.md` skills: Claude Code (tested end to end), Antigravity (setup written from its built-in documentation) or Cursor (setup written from its documentation).
+- An agent that supports MCP servers and `SKILL.md` skills: Claude Code or Antigravity (both tested end to end), or Cursor (setup written from its documentation).
 
 ## What it installs and connects to
 
