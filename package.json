@@ -1,6 +1,6 @@
 {
   "name": "zak-mcp-gateway",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "Token-optimized MCP gateway: one MCP server in front of all your MCP servers, with compact tool search, trimmed results and safety rules.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -26,7 +26,7 @@
     "start": "node dist/cli.js",
     "dev": "tsx src/cli.ts",
     "pretest": "npm run build",
-    "test": "node --import tsx --test tests/unit.test.mjs tests/integration.test.mjs tests/features.test.mjs tests/agent-ui-harness.test.ts",
+    "test": "node --import tsx --test tests/unit.test.mjs tests/integration.test.mjs tests/features.test.mjs tests/resilience.test.mjs tests/agent-ui-harness.test.ts",
     "test:github": "node tests/test-github-live.mjs",
     "bench:github": "node tests/benchmark-github.mjs",
     "report": "node dist/cli.js report",

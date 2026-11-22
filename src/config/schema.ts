@@ -26,6 +26,14 @@ export const DownstreamServerConfigSchema = z.object({
   pinned: z.boolean().default(false),
   /** Block every write tool on this server. */
   readOnly: z.boolean().default(false),
+  /**
+   * Write confirmation for this server only; overrides gateway.safety.confirmWrites.
+   * true also protects the server: its tools are reached only by their full
+   * "server__tool" name, never by a bare or fuzzy name.
+   */
+  confirmWrites: z.boolean().optional(),
+  /** Short note shown next to the server in the instructions and status, e.g. "LIVE, production data". */
+  label: z.string().max(80).optional(),
   /** Default projection per tool name, applied when the agent passes no project_fields. */
   projections: z.record(z.array(z.string())).default({}),
   /** Extra key patterns to drop from this server's JSON results (added to results.dropKeys). */
@@ -182,6 +190,19 @@ export const GatewayKnowledgeConfigSchema = z.object({
   maxRulesChars: z.number().positive().default(6000)
 });
 
+/** How the gateway reports the state of its servers. */
+export const GatewayStatusConfigSchema = z.object({
+  /** Expose mcp_status (state, tools, last error per server; can reconnect). */
+  tool: z.boolean().default(true),
+  /**
+   * JSON status file for status lines and scripts, relative to the config folder.
+   * Default: status.json next to the stats log. false = do not write it.
+   */
+  file: z.union([z.string(), z.literal(false)]).optional(),
+  /** A failed or disconnected server is retried by a call to it at most this often (ms). */
+  retryAfterMs: z.number().int().nonnegative().default(30_000)
+});
+
 export const GatewayClientFeaturesSchema = z.object({
   /** Forward downstream elicitation requests (ask the user) to the agent's client. */
   elicitation: z.boolean().default(false),
@@ -192,7 +213,7 @@ export const GatewayClientFeaturesSchema = z.object({
 export const GatewayConfigSchema = z.object({
   gateway: z.object({
     name: z.string().default("zak-mcp-gateway"),
-    version: z.string().default("0.4.2"),
+    version: z.string().default("0.5.0"),
     logLevel: z.enum(["debug", "info", "warn", "error"]).default("info"),
     /**
      * Longest wait (ms) for downstream servers before answering the agent's MCP handshake.
@@ -200,6 +221,7 @@ export const GatewayConfigSchema = z.object({
      * Agent hosts give a server about 30 s to start (Claude Code's default). 0 = wait for all.
      */
     startupWaitMs: z.number().int().nonnegative().default(15_000),
+    status: GatewayStatusConfigSchema.default({}),
     cache: GatewayCacheConfigSchema.default({}),
     discovery: GatewayDiscoveryConfigSchema.default({}),
     results: GatewayResultsConfigSchema.default({}),

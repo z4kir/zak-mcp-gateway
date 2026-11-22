@@ -37,9 +37,10 @@ test("gateway over MCP: tools/list, search, call, cache, confirm, handles, stats
 
   // tools/list: only meta-tools, small, plus a name catalog in instructions
   const { tools } = await client.listTools();
-  assert.deepEqual(tools.map(x => x.name), ["mcp_search_tools", "mcp_call_tool", "mcp_get_result"]);
+  assert.deepEqual(tools.map(x => x.name), ["mcp_search_tools", "mcp_call_tool", "mcp_get_result", "mcp_status"]);
   const listTokens = estimateTokens(JSON.stringify({ tools })) + estimateTokens(client.getInstructions() ?? "");
-  assert.ok(listTokens < 580, `client sees ${listTokens} tokens of tool definitions`);
+  // 0.5 adds mcp_status (~40 tokens) so the agent can see failed servers.
+  assert.ok(listTokens < 610, `client sees ${listTokens} tokens of tool definitions`);
   assert.match(client.getInstructions(), /testdb \(prefix testdb__\): mock_read_db, mock_write_db/);
 
   // search returns compact signatures

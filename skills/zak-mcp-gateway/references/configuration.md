@@ -4,6 +4,26 @@ The config file (`config/servers.json` by default, created by `npx zak-mcp-gatew
 
 ## Recipes
 
+### A live server next to a local copy (0.5.0)
+
+```json
+"mcpServers": {
+  "app": { "command": "node", "args": ["server.js"] },
+  "app-live": {
+    "url": "https://api.example.com/mcp",
+    "headers": { "Authorization": "Bearer ${APP_LIVE_KEY}" },
+    "label": "LIVE, production data",
+    "confirmWrites": true
+  }
+}
+```
+
+The `label` appears in the catalog, in search hits and in `mcp_status`, so the agent knows which server is production. `confirmWrites: true` makes this server's writes ask first, even if `safety.confirmWrites` is off for the local one. It also protects the server: a bare tool name like `update_record` never resolves to it, even when the local copy is down. Only `app-live__update_record` reaches it. Use `"readOnly": true` instead to block its writes completely.
+
+### See and recover failed servers (0.5.0)
+
+`mcp_status` lists every server with its state (`ok`, `starting`, `FAILED`, `DISCONNECTED`), tool count, label and last error. The instructions add a `Not connected: <server> (<reason>)` line when a server failed at start. A call to a failed or dropped server reconnects it first, at most every `status.retryAfterMs` (30 s). `mcp_status` with `{"reconnect": "<id>"}` or `"all"` retries now. The gateway also writes `status.json` next to the stats log, which `npx zak-mcp-gateway status --line` prints as one line (`MCP app ✓  app-live ✗`) for status bars.
+
 ### Make one server read-only
 
 ```json
@@ -99,10 +119,13 @@ The agent calls `wf__repo_overview` once. Steps follow the normal safety rules, 
 | `projections` | Default fields per tool, used when the agent sends no `project_fields` |
 | `dropKeys` | Extra noise keys (glob) for this server |
 | `readOnly` | Block every write tool on this server |
+| `confirmWrites` | Write confirmation for this server only (overrides `safety.confirmWrites`); `true` also means its tools are reached only by full name |
+| `label` | Short note shown with the server, e.g. `"LIVE, production data"` |
 | `pinned` | Also expose this server's tools directly with full schemas (costs tokens on every request; use sparingly) |
 | `results` (per server) | `inlineTokenLimit`, `maxStringChars`, `distill: full / light / off`, `writeReceipts` |
 | `synonyms`, `defaultArgs`, `forwardInstructions` | Per-server search vocabulary, injected default arguments, forwarding of the server's own instructions |
 | `access`, `writeIf`, `cache`, `cacheTtlSeconds`, `cacheGroup` | Per-tool read/write overrides, argument-based writes, per-server cache control and shared invalidation |
+| `gateway.status` | `tool` (true: expose `mcp_status`), `file` (status.json path; default next to the stats log, `false` = none), `retryAfterMs` (30000) |
 | `gateway.startupWaitMs` | Longest wait for the servers before answering the agent's handshake (15000; `0` = wait for all). Slower servers keep connecting, and calls to them wait for them. |
 | `gateway.cache` | `enabled`, `exactMatchTtlSeconds` (300), `maxEntries` (1000): identical read calls are answered from memory |
 | `gateway.discovery` | `maxSearchResults` (5), `minScore`, `catalog` (`names` / `groups` / `servers` / `off`), `fullSignatures`, `hotSignatures`, `pinnedSignatures`, `metaToolStyle` (`standard` / `slim`), `signatureStyle` (`full` / `oneline`), `alsoStyle` (`summary` / `name`) |

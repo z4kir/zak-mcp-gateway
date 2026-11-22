@@ -2,13 +2,14 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { loadConfig } from "./config/loader.js";
-import { GatewayServer } from "./server/gateway-server.js";
+import { GatewayServer, formatStatusTable, resolveStatusFile } from "./server/gateway-server.js";
 import { CallRecord, SessionRecord, StatsRecord } from "./stats/token-stats.js";
 import { suggestWorkflows } from "./stats/suggestions.js";
 
 const USAGE = `zak-mcp-gateway [--config <servers.json>] [--passthrough]
 zak-mcp-gateway init [--config <servers.json>] [--force]
 zak-mcp-gateway check [--config <servers.json>]
+zak-mcp-gateway status [--config <servers.json>] [--line]
 zak-mcp-gateway report [--config <servers.json> | --log <stats.jsonl>] [--session <id>]
 zak-mcp-gateway --version | --help
 
@@ -16,6 +17,7 @@ zak-mcp-gateway --version | --help
   --passthrough   expose every downstream tool raw (baseline for A/B measurement)
   init            write a starter config and print how to connect your agent
   check           start every server once, print what connected, then exit (code 1 if one failed)
+  status          show the running gateway's servers from its status file (--line: one line, for status bars)
   report          summarize token savings from the stats log`;
 
 /** GitHub MCP noise keys and default fields; the same as in config/servers.example.json. */
@@ -128,18 +130,21 @@ async function check(args: string[]): Promise<void> {
   const config = await loadConfig(configPath);
   config.gateway.startupWaitMs = 0; // wait for every server, however slow
   config.gateway.stats.enabled = false; // a check is not an agent session
+  config.gateway.status.file = false; // and must not overwrite a running gateway's status file
   const gateway = new GatewayServer(config);
   const started = Date.now();
   await gateway.initialize();
   await gateway.whenDownstreamReady();
   const status = gateway.pool.serverStatus();
-  const failed = status.filter(s => s.error !== undefined);
+  const failed = status.filter(s => s.state !== "ok");
   const width = Math.max(6, ...status.map(s => s.serverId.length));
 
   console.log(`Config: ${path.resolve(process.cwd(), configPath ?? path.join("config", "servers.json"))}`);
   if (status.length === 0) console.log("  (no servers configured)");
   for (const s of status) {
-    console.log(`  ${s.serverId.padEnd(width)}  ${s.error !== undefined ? `FAILED: ${s.error}` : `ok, ${s.tools} tools`}`);
+    const label = config.mcpServers[s.serverId]?.label;
+    const result = s.state === "ok" ? `ok, ${s.tools} tools` : `FAILED: ${s.error ?? s.state}`;
+    console.log(`  ${s.serverId.padEnd(width)}  ${result}${label ? `  [${label}]` : ""}`);
   }
   const t = gateway.schemaTokens();
   console.log(`Tool definitions per model request: ~${t.direct} tokens direct vs ~${t.gateway} via the gateway (${t.tools} tools)`);
@@ -147,6 +152,63 @@ async function check(args: string[]): Promise<void> {
     (failed.length ? `${failed.length} of ${status.length} failed.` : "Every server connected."));
   await gateway.close().catch(() => undefined);
   process.exit(failed.length ? 1 : 0);
+}
+
+interface StatusFile {
+  version?: string;
+  pid?: number;
+  updated?: string;
+  servers?: Array<{ id: string; state: string; tools?: number; label?: string | null; readOnly?: boolean; confirmWrites?: boolean; protected?: boolean; error?: string | null }>;
+}
+
+/** Print the running gateway's server states from its status file (no servers are started). */
+async function status(args: string[]): Promise<void> {
+  const config = await loadConfig(flag(args, "--config"));
+  const file = resolveStatusFile(config);
+  const oneLine = args.includes("--line");
+  if (!file) {
+    console.log(oneLine ? "MCP status file off" : "The status file is turned off (gateway.status.file is false).");
+    return;
+  }
+  const text = await fs.readFile(file, "utf-8").catch(() => undefined);
+  if (!text) {
+    console.log(oneLine ? "MCP gateway: no status yet" : `No status file at ${file}. A running gateway (0.5.0 or newer) writes it.`);
+    if (!oneLine) process.exitCode = 1;
+    return;
+  }
+  const s = JSON.parse(text) as StatusFile;
+  const running = typeof s.pid === "number" && isRunning(s.pid);
+  const servers = s.servers ?? [];
+  if (oneLine) {
+    const marks = servers.map(x => `${x.id} ${x.state === "ok" ? "✓" : x.state === "starting" ? "…" : "✗"}`).join("  ");
+    console.log(running ? `MCP ${marks}` : `MCP gateway not running (last: ${marks})`);
+    return;
+  }
+  const age = s.updated ? Math.round((Date.now() - Date.parse(s.updated)) / 1000) : undefined;
+  console.log(`Gateway ${s.version ?? ""} pid ${s.pid ?? "?"}: ${running ? "running" : "not running"}${age !== undefined ? `, updated ${age} s ago` : ""}`);
+  console.log(
+    formatStatusTable(
+      servers.map(x => ({
+        serverId: x.id,
+        state: x.state,
+        tools: x.tools,
+        error: x.error ?? undefined,
+        label: x.label ?? undefined,
+        readOnly: !!x.readOnly,
+        confirmWrites: !!x.confirmWrites,
+        protected: !!x.protected
+      }))
+    )
+  );
+}
+
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 async function report(args: string[]): Promise<void> {
@@ -246,6 +308,7 @@ async function main() {
   }
   if (args[0] === "init") return init(args.slice(1));
   if (args[0] === "check") return check(args.slice(1));
+  if (args[0] === "status") return status(args.slice(1));
   if (args[0] === "report") return report(args.slice(1));
   return serve(args);
 }

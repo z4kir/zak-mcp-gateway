@@ -1,6 +1,15 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import fs from "node:fs";
+
+// MOCK_FAIL_UNLESS_FILE: fail at start until this file exists (a server that is down, then comes back).
+if (process.env.MOCK_FAIL_UNLESS_FILE && !fs.existsSync(process.env.MOCK_FAIL_UNLESS_FILE)) {
+  console.error("mock-server: required file is missing, exiting");
+  process.exit(2);
+}
+// MOCK_EXIT_AFTER_MS: exit after this long (a connection that drops while the gateway runs).
+if (Number(process.env.MOCK_EXIT_AFTER_MS) > 0) setTimeout(() => process.exit(0), Number(process.env.MOCK_EXIT_AFTER_MS));
 
 const server = new Server(
   { name: "mock-server", version: "1.0.0" },

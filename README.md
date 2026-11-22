@@ -10,7 +10,7 @@ One MCP server for your agent, every MCP server behind it, at a fraction of the 
 ![node](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)
 ![typescript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)
 ![mcp sdk](https://img.shields.io/badge/MCP%20SDK-1.32-6b4bc4)
-![tests](https://img.shields.io/badge/tests-72%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-84%20passing-2ea44f)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
 ```bash
@@ -261,6 +261,7 @@ To run a local clone from an agent, point the entry at it: `"command": "node", "
 zak-mcp-gateway [--config <servers.json>] [--passthrough]
 zak-mcp-gateway init [--config <servers.json>] [--force]
 zak-mcp-gateway check [--config <servers.json>]
+zak-mcp-gateway status [--config <servers.json>] [--line]
 zak-mcp-gateway report [--config <servers.json> | --log <stats.jsonl>] [--session <id>]
 zak-mcp-gateway --version | --help
 
@@ -268,8 +269,29 @@ zak-mcp-gateway --version | --help
   --passthrough   expose every downstream tool raw (baseline for A/B measurement)
   init            write a starter config and print how to connect your agent
   check           start every server once, print what connected, then exit (code 1 if one failed)
+  status          show the running gateway's servers from its status file (--line: one line, for status bars)
   report          summarize token savings from the stats log
 ```
+
+### See the servers behind the gateway (0.5)
+
+Claude Code's `/mcp` panel lists what is registered with it, which is one entry: the gateway. That is by design: listing every server separately would bring back every tool schema. Instead, the gateway reports its servers itself:
+
+| Where | What you see |
+|---|---|
+| The agent's instructions | `Not connected: <server> (<reason>)` at session start, only when a server failed |
+| `mcp_status` tool | Ask "gateway status": one row per server with state, tool count, label and last error. `{"reconnect": "<id>"}` or `"all"` retries now |
+| `/mcp__zak-gateway__status` | A prompt you run in Claude Code without asking in words |
+| `@` → `zak://servers` | The same rows as a resource, next to `zak://stats` |
+| `.zak-gateway/status.json` | Written on every change; `zak-mcp-gateway status` prints it, `--line` gives `MCP app ✓  app-live ✗  db ✓` |
+
+To show that line all the time in Claude Code's terminal status line (not confirmed in the VS Code panel), add to `.claude/settings.json`:
+
+```json
+{ "statusLine": { "type": "command", "command": "node /absolute/path/zak-mcp-gateway/dist/cli.js status --config /absolute/path/config/servers.json --line" } }
+```
+
+A server that fails or drops is retried by the next call to it (at most every `status.retryAfterMs`, default 30 s), so it comes back without restarting the gateway.
 
 ### Agent skill
 
@@ -278,8 +300,8 @@ zak-mcp-gateway --version | --help
 To use it, copy the folder into `.claude/skills/` (Claude Code; `~/.claude/skills/` for all projects) or `.agents/skills/` (Antigravity).
 
 [BENCHMARK.md](skills/zak-mcp-gateway/BENCHMARK.md) has the measured numbers on public servers:
-- 94.5% fewer reply tokens on five tasks;
-- 6,399 → 599 tokens of tool definitions per request, on hosts that send every schema;
+- 94.1% fewer reply tokens on five tasks;
+- 6,399 → 637 tokens of tool definitions per request (4 meta-tools), on hosts that send every schema;
 - a live Claude Code run: tool reply 8,360 → 112 tokens, reported cost $0.209 → $0.126;
 - a server that needs 40 s to start: gateway 0.4.1 timed out in Claude Code, 0.4.2 connects and answers.
 
@@ -297,10 +319,11 @@ To use it, copy the folder into `.claude/skills/` (Claude Code; `~/.claude/skill
 | `mcp_get_result` | `handle`, `offset?`, `limit?`, `grep?`, `fields?`, `raw?` | Page, grep, or project a stored result; `raw:true` = original text |
 | `mcp_run_code` | `code` | *(only if `codeMode.enabled`)* run JS with `await call(tool, args)` in a sandboxed process |
 | `mcp_get_skill` | `name` | *(only if skills are configured)* load a skill's full instructions |
+| `mcp_status` *(0.5)* | `reconnect?` | Servers behind the gateway: state, tools, label, last error; `reconnect` = a server id or `"all"` (off with `status.tool: false`) |
 
 `mcp_call_tool` also takes `calls: [...]` (batch), `fresh: true`, `full: true`, and any argument value may be `{"$ref": "r3", "path": "...", "replace": [{"find", "replace"}]}`. `mcp_get_result` also takes `count`, `group_by`, `distinct`, `sort` (`"-x"` = descending), `path` and `max_tokens`.
 
-Plus the **instructions** (one-line tool index per server) and the resource **`zak://stats`** (live savings for the session).
+Plus the **instructions** (one-line tool index per server, with each server's `label`, and a `Not connected:` line when a server failed), the resources **`zak://stats`** (live savings for the session) and **`zak://servers`** (server states), and the prompt **`status`**.
 
 ## ⚙️ Configuration
 
@@ -339,9 +362,12 @@ Full example: [`config/servers.example.json`](config/servers.example.json).
 | `projections` | Default fields per tool, used when the agent sends no `project_fields` |
 | `dropKeys` | Extra noise keys (glob) for this server, on top of `results.dropKeys` |
 | `readOnly` | Block every write tool on this server |
+| `confirmWrites` *(per server, 0.5)* | Write confirmation for this server only, overriding `safety.confirmWrites` (e.g. local writes free, the live server asks first). `true` also **protects** the server: its tools are reached only by their full `server__tool` name, never by a bare or fuzzy name |
+| `label` *(per server, 0.5)* | Short note shown next to the server in the catalog, search hits and status, e.g. `"LIVE, production data"` |
 | `pinned` | Also expose this server's tools directly (full schemas, every request; use sparingly) |
 | `safety.confirmWrites` | Write tools need `confirm: true`, sent after the user agrees |
 | `stats.sessionTokenBudget` | Results get half the room at 80%; calls stop at 100% |
+| `status.tool` / `status.file` / `status.retryAfterMs` *(0.5)* | `mcp_status` on or off (default on); where the status file goes (default `status.json` next to the stats log, `false` = none); how often a call may retry a failed server (default 30000 ms) |
 | `startupWaitMs` *(0.4.2)* | Longest wait (ms, default 15000) for the servers before answering the agent's handshake; slower servers keep connecting and calls to them wait for them. `0` = wait for all |
 | `results` *(per server)* | `inlineTokenLimit`, `maxStringChars`, `distill: full \| light \| off`, `writeReceipts` |
 | `synonyms`, `defaultArgs`, `forwardInstructions` | Per-server search vocabulary, injected default arguments, forwarding of the server's own instructions |
@@ -379,7 +405,7 @@ Tools are classed **read** or **write** from MCP `readOnlyHint` annotations firs
 
 | Command | What it does |
 |---|---|
-| `npm test` | Build + 72 unit, integration and feature tests (full MCP round trips against a mock server, slow-server start-up, CLI `init`/`check`/`--version`) |
+| `npm test` | Build + 84 unit, integration, feature and resilience tests (full MCP round trips against mock servers, slow-server start-up, failed/dropped/restarted servers incl. a real HTTP MCP server, CLI `init`/`check`/`status`/`--version`) |
 | `npm run test:github` | Live check through the real CLI over stdio against the GitHub MCP server (no token needed for public repos) |
 | `npm run bench:github` | Live A/B token benchmark: passthrough vs gateway (`GITHUB_REPO=owner/name` to change the repo) |
 | `npm run bench:compare -- <dir> [--only tuned]` | Live benchmark: no gateway vs an older build (`<dir>` = its `dist`) vs this build (defaults and tuned) |
@@ -460,7 +486,8 @@ Each version has a short release note (what is new, what was fixed, what was mea
 
 | Version | Date | Theme | Highlights | Release note |
 |---|---|---|---|---|
-| **0.4.2** | 15 Nov 2026 | Robust start-up | Answers the agent's handshake within `startupWaitMs` (15 s) while slow servers keep connecting; calls wait only for the server they need; `check` command; `init` adds GitHub default fields and noise keys; exits when the agent disconnects, even during start-up; no child process left behind on close. Live: a 40 s server made 0.4.1 time out in Claude Code, 0.4.2 connects and answers. | [v0.4.2](docs/versions/ZAK_Gateway_v0.4.2.pdf) |
+| **0.5.0** | 22 Nov 2026 | See and recover the servers behind the gateway | `mcp_status` tool (state, tools, label, last error, reconnect); `Not connected:` line in the instructions; `status` prompt, `zak://servers` resource, status file and `status` CLI (`--line` for status bars); a failed or dropped server reconnects on the next call; per-server `confirmWrites` and `label`; bare tool names never reach a protected (live) server; HTTP 401/403 keep the server's own reason, skip the SSE retry and hide the key. | [v0.5.0](docs/versions/ZAK_Gateway_v0.5.0.pdf) |
+| 0.4.2 | 15 Nov 2026 | Robust start-up | Answers the agent's handshake within `startupWaitMs` (15 s) while slow servers keep connecting; calls wait only for the server they need; `check` command; `init` adds GitHub default fields and noise keys; exits when the agent disconnects, even during start-up; no child process left behind on close. Live: a 40 s server made 0.4.1 time out in Claude Code, 0.4.2 connects and answers. | [v0.4.2](docs/versions/ZAK_Gateway_v0.4.2.pdf) |
 | 0.4.1 | 11 Nov 2026 | Published on npm | `npm install zak-mcp-gateway` for any project; `init` writes a starter config and prints the agent entry (Windows-aware); `--version`; library exports with TypeScript types for `import` and `require`; minimum dependency versions raised to the tested ones (MCP SDK 1.32). Token behaviour unchanged from 0.4.0. | [v0.4.1](docs/versions/ZAK_Gateway_v0.4.1.pdf) |
 | 0.4.0 | 6 Oct 2026 | Fewer turns, cheaper turns | Pinned signatures, workflow tools + suggestions, slim meta-tools, lean search replies, name-aware search ranking, multi-table replies. Fixes: workflow output trimming, search ranking. GitHub: −42% vs v0.3 (searching vs pinned). | [v0.4](docs/versions/ZAK_Gateway_v0.4.pdf) |
 | 0.3.0 | 5 Oct 2026 | Economy upgrade | Per-server modes, compact search, catalog modes, hot signatures, batch, default args, aggregation, safe cache, receipts, `$ref` + patch, rules + skills, elicitation/sampling, sandboxed code mode; agent-UI helpers. Lean: −58% / −49%. | [v0.3](docs/versions/ZAK_Gateway_v0.3.pdf) |

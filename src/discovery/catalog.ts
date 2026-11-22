@@ -17,7 +17,7 @@ const VERBS = new Set([
  *   servers github: 26 tools                                       (just the servers)
  *   off     nothing (the agent always searches)
  */
-export function buildCatalog(tools: DownstreamTool[], mode: CatalogMode): string[] {
+export function buildCatalog(tools: DownstreamTool[], mode: CatalogMode, labels: Record<string, string | undefined> = {}): string[] {
   if (mode === "off") return [];
   const byServer = new Map<string, DownstreamTool[]>();
   for (const t of tools) {
@@ -27,7 +27,7 @@ export function buildCatalog(tools: DownstreamTool[], mode: CatalogMode): string
 
   const lines: string[] = [];
   for (const [server, list] of byServer) {
-    const prefix = `${server} (prefix ${server}__)`;
+    const prefix = `${server}${labels[server] ? ` [${labels[server]}]` : ""} (prefix ${server}__)`;
     if (mode === "servers") {
       lines.push(`${prefix}: ${list.length} tools`);
     } else if (mode === "names") {
