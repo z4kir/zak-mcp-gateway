@@ -1,7 +1,7 @@
 {
   "gateway": {
     "name": "zak-mcp-gateway",
-    "version": "0.4.2",
+    "version": "0.5.0",
     "logLevel": "info",
     "cache": {
       "enabled": true,

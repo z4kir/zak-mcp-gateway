@@ -1,15 +1,19 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import {
   CallToolRequestSchema,
+  GetPromptRequestSchema,
+  ListPromptsRequestSchema,
   ListResourcesRequestSchema,
   ListToolsRequestSchema,
   ReadResourceRequestSchema,
   Tool
 } from "@modelcontextprotocol/sdk/types.js";
 import { ValidatedGatewayConfig } from "../config/schema.js";
-import { DownstreamClientPool, NAMESPACE_SEP } from "../downstream/client-pool.js";
+import { DownstreamClientPool, ServerStatus } from "../downstream/client-pool.js";
 import { ToolDiscoveryEngine } from "../discovery/search-index.js";
 import { buildCatalog, CatalogMode } from "../discovery/catalog.js";
 import { matchesAny } from "../util/glob.js";
@@ -24,7 +28,7 @@ import { SchemaTranspiler } from "../synthesizer/ts-transpiler.js";
 import { DownstreamTool, ToolResult } from "../types/tool.js";
 import { estimateTokens } from "../util/tokens.js";
 import { log } from "../util/log.js";
-import { MCP_SEARCH_TOOLS, MCP_CALL_TOOL, MCP_GET_RESULT, MCP_RUN_CODE, MCP_GET_SKILL, slimMetaTool } from "./meta-tools.js";
+import { MCP_SEARCH_TOOLS, MCP_CALL_TOOL, MCP_GET_RESULT, MCP_RUN_CODE, MCP_GET_SKILL, MCP_STATUS, slimMetaTool } from "./meta-tools.js";
 import { KnowledgeBase } from "../knowledge/knowledge-base.js";
 import { WorkflowRunner, WORKFLOW_PREFIX, workflowSummaryTokens } from "../execution/workflows.js";
 
@@ -38,6 +42,7 @@ export interface GatewayServerOptions {
 }
 
 const STATS_URI = "zak://stats";
+const SERVERS_URI = "zak://servers";
 
 /**
  * TO-MCP Gateway Server:
@@ -64,6 +69,7 @@ export class GatewayServer {
     const g = config.gateway;
     log.setLevel(g.logLevel);
     this.pool = new DownstreamClientPool(g.clientFeatures);
+    this.pool.onStatusChange(() => this.scheduleStatusWrite());
     this.pool.setForwarder({
       elicit: async params => {
         if (!this.server?.getClientCapabilities()?.elicitation) return { action: "decline" };
@@ -103,7 +109,7 @@ export class GatewayServer {
    */
   public async initialize(): Promise<void> {
     for (const server of Object.values(this.config.mcpServers)) this.discovery.addSynonyms(server.synonyms ?? {});
-    const all = this.pool.initializeServers(this.config.mcpServers, (_id, tools) => this.discovery.registerTools(tools));
+    const all = this.pool.initializeServers(this.config.mcpServers, this.onServerReady);
     this.downstreamReady = all
       .then(tools => this.finishDownstream(tools))
       .catch(err => log.error(`[startup] setup after connecting failed: ${(err as Error).message}`));
@@ -121,18 +127,34 @@ export class GatewayServer {
 
     this.server = new Server(
       { name: this.config.gateway.name, version: this.config.gateway.version },
-      { capabilities: { tools: { listChanged: true }, resources: {} }, instructions: this.instructions || undefined }
+      { capabilities: { tools: { listChanged: true }, resources: {}, prompts: {} }, instructions: this.instructions || undefined }
     );
     this.setupHandlers(this.server);
 
-    const listedAtStart = JSON.stringify(this.listTools());
+    this.listedTools = JSON.stringify(this.listTools());
     void this.downstreamReady.then(() => {
       this.recordSession();
-      // Pinned servers and passthrough mode list downstream tools directly: tell the client.
-      if (!inTime && JSON.stringify(this.listTools()) !== listedAtStart) {
-        this.server?.sendToolListChanged().catch(() => undefined);
-      }
+      this.notifyToolListChanged();
+      this.writeStatusFile();
     });
+  }
+
+  /** Tools of a server that connected (at start or on reconnect) replace its old ones in search. */
+  private readonly onServerReady = (serverId: string, tools: DownstreamTool[]): void => {
+    this.discovery.removeServer(serverId);
+    this.discovery.registerTools(tools);
+    this.notifyToolListChanged();
+  };
+
+  /** tools/list as last sent; pinned servers and passthrough mode list downstream tools directly. */
+  private listedTools?: string;
+
+  private notifyToolListChanged(): void {
+    if (this.listedTools === undefined) return; // before the handshake: the first tools/list is still to come
+    const now = JSON.stringify(this.listTools());
+    if (now === this.listedTools) return;
+    this.listedTools = now;
+    this.server?.sendToolListChanged().catch(() => undefined);
   }
 
   /** Runs once every server has connected or failed. */
@@ -174,17 +196,124 @@ export class GatewayServer {
   }
 
   /**
-   * Calls that use downstream tools wait for servers that are still starting: a call by name
-   * waits only for its own server, everything else for all of them.
+   * Before a call that uses downstream tools. A call by name waits only for its own server and
+   * reconnects it first if it is failed or disconnected (at most every status.retryAfterMs);
+   * anything else waits for every server that is still starting. Returns an error result when
+   * the named server is still down, saying why and how to retry.
    */
-  private async awaitStartingServers(name: string, args: Record<string, unknown>): Promise<void> {
-    if (this.pool.pendingServers().length === 0) return;
+  private async prepareServers(name: string, args: Record<string, unknown>): Promise<ToolResult | undefined> {
     const toolName = name === "mcp_call_tool" && !Array.isArray(args.calls) ? args.tool_name : name;
     if (typeof toolName === "string") {
-      const serverId = toolName.split(NAMESPACE_SEP)[0];
-      if (serverId !== toolName && serverId in this.config.mcpServers) return this.pool.whenSettled(serverId);
+      const trimmed = toolName.trim();
+      const serverId = trimmed.split(/__|::|\.|\/|:/)[0];
+      if (serverId !== trimmed && serverId in this.config.mcpServers) {
+        if (this.pool.pendingServers().includes(serverId)) {
+          await this.pool.whenSettled(serverId);
+        } else if (this.pool.canRetry(serverId, this.config.gateway.status.retryAfterMs)) {
+          log.info(`[pool] ${serverId}: reconnecting for a call to ${trimmed}`);
+          await this.pool.reconnect(serverId, this.onServerReady);
+        }
+        const st = this.pool.statusOf(serverId);
+        if (st && (st.state === "failed" || st.state === "disconnected")) {
+          const retry = this.config.gateway.status.tool ? ` mcp_status {"reconnect": "${serverId}"} retries now.` : "";
+          return {
+            content: [{ type: "text", text: `Server "${serverId}" is not connected (${st.state}: ${st.error ?? "unknown error"}).${retry}` }],
+            isError: true
+          };
+        }
+        return undefined;
+      }
     }
-    await this.downstreamReady;
+    if (this.pool.pendingServers().length) await this.downstreamReady;
+    return undefined;
+  }
+
+  /** One row per configured server: connection state plus what the config says about it. */
+  public serverRows(): Array<ServerStatus & { label?: string; readOnly: boolean; confirmWrites: boolean; protected: boolean }> {
+    return this.pool.serverStatus().map(st => {
+      const cfg = this.config.mcpServers[st.serverId];
+      return {
+        ...st,
+        label: cfg?.label,
+        readOnly: !!cfg?.readOnly || this.config.gateway.safety.readOnly,
+        confirmWrites: this.policy.confirmWritesEnabled(st.serverId),
+        protected: this.pool.isProtected(st.serverId)
+      };
+    });
+  }
+
+  /** The status table mcp_status, the status prompt and the CLI show. */
+  public statusTable(): string {
+    return formatStatusTable(this.serverRows());
+  }
+
+  private async handleStatus(args: Record<string, unknown>): Promise<ToolResult> {
+    const target = typeof args.reconnect === "string" ? args.reconnect.trim() : "";
+    const notes: string[] = [];
+    if (target) {
+      if (target !== "all" && !(target in this.config.mcpServers)) {
+        return { content: [{ type: "text", text: `Unknown server "${target}". Servers: ${Object.keys(this.config.mcpServers).join(", ")}` }], isError: true };
+      }
+      const ids = target === "all"
+        ? this.pool.serverStatus().filter(st => st.state === "failed" || st.state === "disconnected").map(st => st.serverId)
+        : [target];
+      // A named server is reconnected even if it looks up (e.g. a remote server was redeployed).
+      const results = await Promise.all(ids.map(id => this.pool.reconnect(id, this.onServerReady, target !== "all")));
+      notes.push(
+        ids.length
+          ? `Reconnect: ${results.map(r => `${r.serverId} ${r.state === "ok" ? "ok" : `still ${r.state}`}`).join(", ")}`
+          : "Reconnect: nothing to reconnect, every server is up or starting."
+      );
+    }
+    const text = [this.statusTable(), ...notes].join("\n");
+    this.stats.recordCall({ via: "status", tool: "mcp_status", rawTokens: 0, sentTokens: estimateTokens(text), cacheHit: false, ms: 0 });
+    return { content: [{ type: "text", text }] };
+  }
+
+  /** status.json for status lines and scripts: next to the stats log unless configured. */
+  public statusFilePath(): string | undefined {
+    return resolveStatusFile(this.config);
+  }
+
+  private statusTimer?: NodeJS.Timeout;
+
+  private scheduleStatusWrite(): void {
+    if (this.statusTimer) return;
+    this.statusTimer = setTimeout(() => {
+      this.statusTimer = undefined;
+      this.writeStatusFile();
+    }, 150);
+    this.statusTimer.unref();
+  }
+
+  public writeStatusFile(): void {
+    const file = this.statusFilePath();
+    if (!file) return;
+    const body = {
+      gateway: this.config.gateway.name,
+      version: this.config.gateway.version,
+      pid: process.pid,
+      updated: new Date().toISOString(),
+      configDir: this.config.configDir ?? process.cwd(),
+      servers: this.serverRows().map(r => ({
+        id: r.serverId,
+        state: r.state,
+        tools: r.tools ?? 0,
+        label: r.label ?? null,
+        readOnly: r.readOnly,
+        confirmWrites: r.confirmWrites,
+        protected: r.protected,
+        error: r.error ?? null,
+        since: r.since,
+        attempts: r.attempts
+      }))
+    };
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(body, null, 2) + "\n");
+    } catch (err) {
+      log.warn(`[status] cannot write ${file}: ${(err as Error).message}`);
+    }
   }
 
   public async connect(transport: Transport): Promise<void> {
@@ -217,13 +346,14 @@ export class GatewayServer {
     const meta = [MCP_SEARCH_TOOLS, MCP_CALL_TOOL, MCP_GET_RESULT];
     if (this.knowledge.hasSkills) meta.push(MCP_GET_SKILL);
     if (this.config.gateway.codeMode.enabled) meta.push(MCP_RUN_CODE);
+    if (this.config.gateway.status.tool) meta.push(MCP_STATUS);
     const styled = this.config.gateway.discovery.metaToolStyle === "slim" ? meta.map(slimMetaTool) : meta;
     const pinned = this.visibleTools()
       .filter(t => t.isPinned)
       .map(t => ({
         name: t.namespacedName,
         description: t.description,
-        inputSchema: pinnedSchema(t, this.config.gateway.safety.confirmWrites)
+        inputSchema: pinnedSchema(t, this.policy.confirmWritesEnabled(t.serverId))
       }) as Tool);
     return [...styled, ...pinned];
   }
@@ -239,7 +369,13 @@ export class GatewayServer {
       "Tools below run via mcp_call_tool by name (a wrong argument returns the signature); use mcp_search_tools only if unsure. project_fields = only the fields you need."
     ];
     const mode: CatalogMode = d.catalog ?? (d.catalogInInstructions ? "names" : "off");
-    lines.push(...buildCatalog(this.visibleTools(), mode));
+    const labels = Object.fromEntries(Object.entries(this.config.mcpServers).map(([id, c]) => [id, c.label]));
+    lines.push(...buildCatalog(this.visibleTools(), mode, labels));
+    const failed = this.pool.serverStatus().filter(st => st.state === "failed" || st.state === "disconnected");
+    if (failed.length) {
+      const why = failed.map(st => `${st.serverId} (${clipText(st.error ?? st.state, 100)})`).join("; ");
+      lines.push(`Not connected: ${why}.${this.config.gateway.status.tool ? " mcp_status shows details and can reconnect." : ""}`);
+    }
     if (this.startingServers.length) {
       lines.push(`Still starting: ${this.startingServers.join(", ")}. Their tools are not listed here yet; mcp_search_tools and mcp_call_tool wait for them.`);
     }
@@ -286,16 +422,39 @@ export class GatewayServer {
     });
 
     server.setRequestHandler(ListResourcesRequestSchema, async () => ({
-      resources: [{ uri: STATS_URI, name: "Gateway token savings", mimeType: "application/json" }]
+      resources: [
+        { uri: STATS_URI, name: "Gateway token savings", mimeType: "application/json" },
+        { uri: SERVERS_URI, name: "Servers behind the gateway", mimeType: "application/json" }
+      ]
     }));
     server.setRequestHandler(ReadResourceRequestSchema, async request => {
+      if (request.params.uri === SERVERS_URI) {
+        return { contents: [{ uri: SERVERS_URI, mimeType: "application/json", text: JSON.stringify(this.serverRows()) }] };
+      }
       if (request.params.uri !== STATS_URI) throw new Error(`Unknown resource ${request.params.uri}`);
       return { contents: [{ uri: STATS_URI, mimeType: "application/json", text: JSON.stringify(this.stats.summary()) }] };
+    });
+
+    // A prompt the user can run without asking in words (Claude Code: /mcp__<gateway>__status).
+    server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+      prompts: [{ name: "status", description: "Servers behind the gateway: state, tools and last error" }]
+    }));
+    server.setRequestHandler(GetPromptRequestSchema, async request => {
+      if (request.params.name !== "status") throw new Error(`Unknown prompt ${request.params.name}`);
+      const text =
+        `ZAK MCP Gateway status:\n${this.statusTable()}\n\n` +
+        "Summarize this for me: which servers are not connected and what to fix. " +
+        "The gateway has a tool whose name ends in mcp_status (load it if your tools are listed on demand): " +
+        "call it with {\"reconnect\": \"<server>\"} to retry a server once its cause is fixed. Ask me before reconnecting.";
+      return { description: "Gateway server status", messages: [{ role: "user", content: { type: "text", text } }] };
     });
   }
 
   public async handleCall(name: string, args: Record<string, unknown>): Promise<ToolResult> {
-    if (name !== "mcp_get_result" && name !== "mcp_get_skill") await this.awaitStartingServers(name, args);
+    if (name !== "mcp_get_result" && name !== "mcp_get_skill" && name !== "mcp_status") {
+      const down = await this.prepareServers(name, args);
+      if (down) return down;
+    }
     if (this.options.passthrough) return this.passthroughCall(name, args);
 
     switch (name) {
@@ -310,7 +469,7 @@ export class GatewayServer {
           const defs = matches
             .map(m => this.pool.getTool(m.namespacedName))
             .filter((x): x is DownstreamTool => !!x)
-            .map(x => ({ name: x.namespacedName, description: x.description, inputSchema: pinnedSchema(x, this.config.gateway.safety.confirmWrites), access: x.access }));
+            .map(x => ({ name: x.namespacedName, description: x.description, inputSchema: pinnedSchema(x, this.policy.confirmWritesEnabled(x.serverId)), access: x.access }));
           return { content: [{ type: "text", text: JSON.stringify(defs) }] };
         }
         const full = args.detail === "full" ? matches.length : this.config.gateway.discovery.fullSignatures;
@@ -401,6 +560,10 @@ export class GatewayServer {
 
       case "mcp_run_code":
         return this.handleRunCode(String(args.code ?? ""));
+
+      case "mcp_status":
+        if (this.config.gateway.status.tool) return this.handleStatus(args);
+        return { content: [{ type: "text", text: "mcp_status is turned off in the gateway config (gateway.status.tool)." }], isError: true };
 
       default: {
         if (name.startsWith(WORKFLOW_PREFIX) && this.workflows?.resolve(name)) {
@@ -546,4 +709,37 @@ function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> 
     };
     promise.then(done, done);
   });
+}
+
+function clipText(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+/** server | state | tools | note, aligned for a terminal or a chat reply. */
+export function formatStatusTable(
+  rows: Array<{ serverId: string; state: string; tools?: number; error?: string; label?: string; readOnly: boolean; confirmWrites: boolean; protected: boolean }>
+): string {
+  const table = rows.map(r => {
+    const note = [
+      r.label,
+      r.readOnly ? "read-only" : r.confirmWrites ? "writes need confirm" : undefined,
+      r.protected ? "full names only" : undefined,
+      r.error ? clipText(r.error, 160) : undefined
+    ].filter(Boolean).join("; ");
+    const state = r.state === "failed" || r.state === "disconnected" ? r.state.toUpperCase() : r.state;
+    return [r.serverId, state, r.state === "ok" ? String(r.tools ?? 0) : "-", note];
+  });
+  const head = ["server", "state", "tools", "note"];
+  const widths = head.map((h, i) => Math.max(h.length, ...table.map(row => row[i].length)));
+  const line = (cells: string[]) => cells.map((c, i) => (i === cells.length - 1 ? c : c.padEnd(widths[i]))).join("  ").trimEnd();
+  return [line(head), ...table.map(line)].join("\n");
+}
+
+/** Where the status file goes: gateway.status.file, else status.json next to the stats log; undefined when turned off. */
+export function resolveStatusFile(config: ValidatedGatewayConfig & { configDir?: string }): string | undefined {
+  const file = config.gateway.status.file;
+  if (file === false) return undefined;
+  const dir = config.configDir ?? process.cwd();
+  return file ? path.resolve(dir, file) : path.join(path.dirname(path.resolve(dir, config.gateway.stats.logFile)), "status.json");
 }

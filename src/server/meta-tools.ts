@@ -75,6 +75,12 @@ export const MCP_RUN_CODE: Tool = {
   }
 };
 
+export const MCP_STATUS: Tool = {
+  name: "mcp_status",
+  description: "Server states and errors. reconnect: server id or all.",
+  inputSchema: { type: "object", properties: { reconnect: { type: "string" } } }
+};
+
 export const MCP_GET_SKILL: Tool = {
   name: "mcp_get_skill",
   description: "Load the full instructions of a skill listed in the server instructions.",
@@ -90,6 +96,7 @@ const SLIM_DESCRIPTIONS: Record<string, string> = {
   mcp_call_tool: "Call a tool by name (or several via calls); big results return a handle.",
   mcp_get_result: "Read a stored result: page, grep, fields, path, raw, count, group_by, distinct, sort.",
   mcp_get_skill: "Load a skill by name.",
+  mcp_status: "Server states and errors; reconnect: id or \"all\".",
   mcp_run_code: "Run JS in a sandbox: await call(tool, args); only the return value comes back."
 };
 

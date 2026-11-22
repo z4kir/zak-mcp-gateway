@@ -225,8 +225,10 @@ export class ExecutionDispatcher {
     }).result;
   }
 
-  public needsConfirmation(): boolean {
-    return this.policy.confirmWritesEnabled();
+  /** Whether writes need confirmation: for the server of toolName, or gateway-wide. */
+  public needsConfirmation(toolName?: string): boolean {
+    const tool = toolName ? this.pool.resolveTool(toolName) : undefined;
+    return this.policy.confirmWritesEnabled(tool?.serverId);
   }
 
   /** Server-configured default arguments (page size, server-side field selection) the agent omitted. */

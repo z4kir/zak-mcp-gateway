@@ -75,6 +75,11 @@ export class WorkflowRunner {
     return wf.steps.some(s => this.dispatcher.staticAccess(s.tool) === "write");
   }
 
+  /** A step writes to a server whose writes need confirmation. */
+  private needsConfirmation(wf: WorkflowConfig): boolean {
+    return wf.steps.some(s => this.dispatcher.staticAccess(s.tool) === "write" && this.dispatcher.needsConfirmation(s.tool));
+  }
+
   public async run(name: string, input: unknown, confirm: boolean): Promise<{ result: ToolResult; rawTokens: number }> {
     const found = this.resolve(name);
     if (!found) return { result: fail(`Unknown workflow "${name}".`), rawTokens: 0 };
@@ -88,7 +93,7 @@ export class WorkflowRunner {
     if (check.errors.length) return { result: fail(`Invalid input for ${tag}: ${check.errors.join("; ")}.`), rawTokens: 0 };
 
     // One confirmation for the whole workflow, shown as a preview before anything runs.
-    if (!confirm && this.hasWrites(wf) && this.dispatcher.needsConfirmation()) {
+    if (!confirm && this.needsConfirmation(wf)) {
       const plan = wf.steps.map((s, i) => `${i + 1}. ${s.tool}${s.forEach ? ` for each of ${s.forEach}` : ""}${this.dispatcher.staticAccess(s.tool) === "write" ? " (changes data)" : ""}`);
       return {
         result: fail(`${tag} changes data. Steps:\n${plan.join("\n")}\nConfirm with the user, then call ${tag} again with "confirm": true.`),

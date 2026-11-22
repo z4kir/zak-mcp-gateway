@@ -31,8 +31,8 @@ export class SchemaTranspiler {
 
   public static transpileToTypeScript(tool: DownstreamTool): string {
     const header = tool.description
-      ? `// [${tool.serverId}] ${clip(collapse(tool.description), MAX_TOOL_DESCRIPTION)}\n`
-      : `// [${tool.serverId}]\n`;
+      ? `// [${serverTag(tool)}] ${clip(collapse(tool.description), MAX_TOOL_DESCRIPTION)}\n`
+      : `// [${serverTag(tool)}]\n`;
 
     try {
       const params = this.renderParams(tool.inputSchema);
@@ -168,4 +168,9 @@ function unique(values: string[]): string[] {
 
 function safeKey(key: string): string {
   return /^[A-Za-z_$][\w$]*$/.test(key) ? key : JSON.stringify(key);
+}
+
+/** "server" or "server · label" for signature comments. */
+function serverTag(tool: DownstreamTool): string {
+  return tool.serverLabel ? `${tool.serverId} · ${tool.serverLabel}` : tool.serverId;
 }

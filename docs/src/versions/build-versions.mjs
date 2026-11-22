@@ -190,6 +190,39 @@ const VERSIONS = [
       "Set gateway.startupWaitMs to 0 to wait for every server, as before.",
       "Run zak-mcp-gateway check once after changing servers.json; it also fills the npx cache, so the agent's starts are faster."
     ]
+  },
+  {
+    version: "0.5.0",
+    date: "22 Nov 2026",
+    theme: "See and recover the servers behind the gateway",
+    summary: "Found while connecting a live HTTP server next to a local copy: a server that failed was silent, the agent's /mcp list shows only the gateway, and a bare tool name could reach the live server. Seven additions fix this. Token savings stay above 90%.",
+    analogy: "The concierge now keeps a board of every back office (open, closed, why), phones a closed one again when someone needs it, and marks the production office so nobody walks in by mistake.",
+    added: [
+      ["Failed servers visible", "Not connected: <server> (<reason>) in the instructions when a server failed at start, and the mcp_status tool: state, tools, label and last error per server.", "gateway.status.tool"],
+      ["Visible to the user", "A status prompt (in Claude Code it appears in the slash-command menu), the zak://servers resource, a status.json file and the status CLI; --line prints MCP app ✓ app-live ✗ for status bars.", "zak-mcp-gateway status"],
+      ["Reconnect", "A call to a failed or dropped server reconnects it first (at most every retryAfterMs); mcp_status reconnect retries one server or all now. A read that hits a dropped connection is retried once on a fresh one; a write never is.", "gateway.status.retryAfterMs"],
+      ["Per-server confirmWrites", "Local writes free, the live server asks first; the global setting stays the default.", "mcpServers.<id>.confirmWrites"],
+      ["Protected servers", "A server with its own confirmWrites: true is reached only by its full server__tool name, never by a bare or fuzzy one.", "mcpServers.<id>.confirmWrites"],
+      ["Server labels", "A short note such as LIVE, production data in the catalog, search hits and status.", "mcpServers.<id>.label"],
+      ["Clear auth errors", "HTTP 401/403 keep the server's own reason with a Bearer hint, the useless SSE retry is skipped, and secret values are removed from every message.", "built in"]
+    ],
+    fixed: [
+      ["A server that failed at start was silent: one log line, no message in the session, no retry", "Named in the instructions and mcp_status; reconnects on the next call"],
+      ["A bare tool name went to the live server when the local copy with the same tools was down", "Bare and fuzzy names never reach a protected server"],
+      ["A 401 from an HTTP server was replaced by the SSE fallback error", "The server's own text is kept: HTTP 401 Unauthorized: send 'Bearer <token>'"],
+      ["After a remote server restarted, calls kept failing on the old session", "The server is marked disconnected and reconnected; reads are retried once"]
+    ],
+    measured: [
+      ["Built CLI over stdio, live HTTP server configured without Bearer", "Not connected line with the server's reason; after the fix all ok; after a server restart the next read recovered; the key appeared nowhere"],
+      ["Claude Code 2.1, one working and one failed server", "Asked which servers work, the agent called mcp_status and reported the failed one and why; the status prompt gave the same overview"],
+      ["Skill benchmark, 5 tasks on public GitHub + filesystem servers", "tool definitions 6,399 to 637 tokens per request (4 meta-tools); replies 72,372 to 4,305 tokens (-94.1%)"],
+      ["Tests", "84 of 84 pass (12 new, including a real HTTP MCP server that restarts mid-session)"]
+    ],
+    notes: [
+      "For a live server next to a local copy, set label and confirmWrites: true on the live one.",
+      "mcp_status adds about 38 tokens per request; turn it off with gateway.status.tool: false.",
+      "The agent's /mcp list still shows only the gateway: that is by design, since listing every server would bring back every tool schema."
+    ]
   }
 ];
 

@@ -114,6 +114,16 @@ export class ToolDiscoveryEngine {
     this.prefixCache.clear();
   }
 
+  /** Drops every tool of one server (before registering its new list after a reconnect). */
+  public removeServer(serverId: string): void {
+    for (const [id, tool] of this.toolRegistry) {
+      if (tool.serverId !== serverId) continue;
+      this.miniSearch.discard(id);
+      this.toolRegistry.delete(id);
+    }
+    this.prefixCache.clear();
+  }
+
   /**
    * Query the index and return compact signatures for the top matches.
    * `minScore` is relative: matches scoring below minScore * best are dropped.

@@ -48,6 +48,8 @@ export interface DownstreamTool {
   annotations?: ToolAnnotations;
   access: ToolAccess;
   isPinned?: boolean;
+  /** The server's label from the config (e.g. "LIVE"), shown next to the server name. */
+  serverLabel?: string;
 }
 
 export interface CompactToolSignature {

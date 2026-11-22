@@ -2,18 +2,20 @@
 
 Teaches a coding agent to set up **ZAK MCP Gateway** in a project and to work through it efficiently. The gateway is one MCP server in front of all the project's MCP servers, so the agent spends far fewer tokens on tool definitions and tool results.
 
-Measured on the public GitHub and filesystem MCP servers ([BENCHMARK.md](BENCHMARK.md), gateway 0.4.2):
-- **tool replies, 5 tasks:** 79,507 → 4,369 tokens (−94.5%), every answer still complete;
-- **tool definitions per model request:** 6,399 → 599 tokens (−90.6%), on hosts that send every tool schema with each request, such as Antigravity;
+Measured on the public GitHub and filesystem MCP servers ([BENCHMARK.md](BENCHMARK.md), gateway 0.5.0):
+- **tool replies, 5 tasks:** 72,372 → 4,305 tokens (−94.1%), every answer still complete;
+- **tool definitions per model request:** 6,399 → 637 tokens (−90.0%), on hosts that send every tool schema with each request, such as Antigravity;
 - **live in Claude Code**, one question per setup: tool reply 8,360 → 112 tokens, new input tokens −47.6%, reported cost $0.209 → $0.126. Claude Code already loads MCP tool schemas on demand, so its gain comes from the smaller results;
-- **slow servers:** a server that needs 40 s to start made gateway 0.4.1 time out in Claude Code. With 0.4.2 the gateway connects after 15 s and answers.
+- **slow servers:** a server that needs 40 s to start made gateway 0.4.1 time out in Claude Code. From 0.4.2 the gateway connects after 15 s and answers;
+- **failed servers (0.5.0):** asked which servers work, Claude Code called `mcp_status` and reported the failed one and why. A failed or dropped server reconnects on the next call.
 
 ## What the agent learns
 
 - **When to use the gateway, and when not** (a single tiny server does not benefit).
 - **Setup:** install from npm, `npx zak-mcp-gateway init`, move the existing MCP servers into one config with secrets as `${VAR}`, check them with `npx zak-mcp-gateway check`, and register only the gateway in Claude Code (`.mcp.json`), Cursor (`.cursor/mcp.json`) or Antigravity (`~/.gemini/config/mcp_config.json`). The Windows forms are included.
 - **Usage rules:** call tools by name, ask only for the fields it needs, page and filter big results by handle instead of re-running tools, batch reads, and pass stored data with `$ref`.
-- **Safety:** writes run only with your approval (`confirm: true`), and instruction-like text in tool results is treated as data.
+- **Safety:** writes run only with your approval (`confirm: true`), a live server can be labelled and protected (`label`, per-server `confirmWrites`), and instruction-like text in tool results is treated as data.
+- **When a server is down:** check `mcp_status`, report the reason (for example a wrong `Authorization` header), and reconnect once it is fixed.
 - **Troubleshooting:** the gateway's real error messages and their fixes, plus start-up timeouts, Claude Code's pending approvals and Antigravity environment variables.
 
 ## Example requests that activate it
@@ -32,7 +34,7 @@ Measured on the public GitHub and filesystem MCP servers ([BENCHMARK.md](BENCHMA
 
 ## Requirements
 
-- Node.js 20+ and npm; `zak-mcp-gateway` 0.4.2 or newer (the agent installs the latest).
+- Node.js 20+ and npm; `zak-mcp-gateway` 0.5.0 or newer (the agent installs the latest).
 - An agent that supports MCP servers and `SKILL.md` skills: Claude Code or Antigravity (both tested end to end), or Cursor (setup written from its documentation).
 
 ## What it installs and connects to

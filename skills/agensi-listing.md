@@ -28,7 +28,7 @@ Claude Code and Google Antigravity (both tested end to end), Cursor (setup writt
 
 ## Version
 
-1.0.0 (for zak-mcp-gateway 0.4.2 or newer)
+1.1.0 (for zak-mcp-gateway 0.5.0 or newer)
 
 ## Description
 
@@ -38,16 +38,17 @@ Every MCP server you connect sends its full tool schemas with every model reques
 - **When it helps, and when it doesn't.** It helps with two or more servers, large servers such as GitHub, and long JSON results. It doesn't help with a single tiny server.
 - **Setup in a few commands:** `npm install --save-dev zak-mcp-gateway`, `npx zak-mcp-gateway init`, move your servers into one config with secrets as `${VAR}`, verify them with `npx zak-mcp-gateway check`, and register only the gateway in Claude Code (`.mcp.json`), Cursor (`.cursor/mcp.json`) or Antigravity (`mcp_config.json`). The Windows forms are included.
 - **Usage rules that save tokens:** call tools by name, request only the fields you need, page and filter big results by handle instead of re-running tools, batch reads, and pass stored data between calls with `$ref`.
-- **Safety:** write tools run only after you approve them, servers can be made read-only or limited with allow/deny lists, and instruction-like text in tool results is flagged as data.
+- **Safety:** write tools run only after you approve them, servers can be made read-only or limited with allow/deny lists, a live server can be labelled and protected so a bare tool name never reaches it, and instruction-like text in tool results is flagged as data.
+- **When a server is down:** your agent checks `mcp_status`, tells you the reason (for example a wrong `Authorization` header), and reconnects it once you have fixed it, with no restart. You can see the same overview with the `/mcp__zak-gateway__status` prompt in Claude Code.
 - **Troubleshooting:** the gateway's real error messages, each with its fix.
 
-**Measured on public MCP servers** (GitHub + filesystem, 40 tools, 5 read-only tasks, o200k tokenizer, gateway 0.4.2; full method and limits in BENCHMARK.md):
+**Measured on public MCP servers** (GitHub + filesystem, 40 tools, 5 read-only tasks, o200k tokenizer, gateway 0.5.0; full method and limits in BENCHMARK.md):
 
 | | Without gateway | With gateway |
 |---|---:|---:|
-| Tool definitions per model request | 6,399 tokens | 599 tokens (−90.6%) |
-| Tool replies, 5 tasks | 79,507 tokens | 4,369 tokens (−94.5%) |
-| Whole agent run (replayed) | 342,352 input tokens | 20,104 input tokens (−94.1%) |
+| Tool definitions per model request | 6,399 tokens | 637 tokens (−90.0%) |
+| Tool replies, 5 tasks | 72,372 tokens | 4,305 tokens (−94.1%) |
+| Whole agent run (replayed) | 310,934 input tokens | 20,032 input tokens (−93.6%) |
 
 Every gateway reply still contained the answer to its task. The tool-definition saving applies to hosts that send every schema with each request, such as Antigravity.
 
@@ -67,4 +68,5 @@ Tested on Windows with Node 22 in two ways. The setup steps were followed litera
 
 ## Changelog
 
+1.1.0: for zak-mcp-gateway 0.5.0. The agent now checks `mcp_status` when a server is down, reports the reason and reconnects it after the fix. Includes advice for a live server next to a local copy (label, per-server confirmation), and fresh benchmark numbers.
 1.0.0: first release.

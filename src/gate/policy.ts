@@ -15,12 +15,22 @@ export type PolicyDecision =
 export class PolicyEngine {
   constructor(
     private safety: GatewaySafetyConfig,
-    private servers: Record<string, Pick<DownstreamServerConfig, "readOnly">>
+    private servers: Record<string, Partial<Pick<DownstreamServerConfig, "readOnly" | "confirmWrites">>>
   ) {}
 
-  /** Writes are possible (not read-only) and need confirmation. */
-  public confirmWritesEnabled(): boolean {
-    return this.safety.confirmWrites && !this.safety.readOnly;
+  /**
+   * Writes are possible (not read-only) and need confirmation: for one server (its own
+   * confirmWrites, else the gateway default), or with no server given, for the gateway default.
+   */
+  public confirmWritesEnabled(serverId?: string): boolean {
+    if (this.safety.readOnly) return false;
+    if (serverId === undefined) return this.safety.confirmWrites;
+    return !this.servers[serverId]?.readOnly && this.needsConfirm(serverId);
+  }
+
+  /** The server's own confirmWrites, else the gateway-wide setting. */
+  public needsConfirm(serverId: string): boolean {
+    return this.servers[serverId]?.confirmWrites ?? this.safety.confirmWrites;
   }
 
   public isVisible(tool: Pick<DownstreamTool, "namespacedName">): boolean {
@@ -41,9 +51,9 @@ export class PolicyEngine {
     if (this.servers[tool.serverId]?.readOnly) {
       return { allowed: false, reason: `Server "${tool.serverId}" is read-only; write tool "${tool.namespacedName}" is blocked.` };
     }
-    if (this.safety.confirmWrites && !confirmed) {
+    if (this.needsConfirm(tool.serverId) && !confirmed) {
       return inCodeMode
-        ? { allowed: false, reason: `Write tool "${tool.namespacedName}" cannot run inside mcp_run_code while confirmWrites is on. Call it with mcp_call_tool and confirm: true.` }
+        ? { allowed: false, reason: `Write tool "${tool.namespacedName}" cannot run inside mcp_run_code while writes need confirmation. Call it with mcp_call_tool and confirm: true.` }
         : {
             allowed: false,
             needsConfirmation: true,
